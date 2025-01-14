@@ -116,8 +116,13 @@
         }
       }
 
+      // Keep track of all rendered tweets to prevent duplicates
+      const renderedTweets = new Set();
+
       // Helper function to render a single tweet
       function renderTweet(t, isThread = false) {
+        // Mark this tweet as rendered
+        renderedTweets.add(t.id_str);
         const createdAt = formatDate(t.created_at);
         let textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
 
@@ -179,7 +184,7 @@
       }
 
       // Helper function to render a tweet and all its replies that we have
-      function renderTweetThread(tweetId, lastRenderedTweetId) {
+      function renderTweetThread(tweetId) {
         const thread = [];
         let currentTweetId = tweetId;
         
@@ -188,14 +193,13 @@
           const tweet = tweetMap.get(currentTweetId);
           if (!tweet) break;
           
-          thread.unshift(tweet); // Add to start of array
+          // Only include tweets we haven't rendered yet
+          if (!renderedTweets.has(tweet.id_str)) {
+            thread.unshift(tweet); // Add to start of array
+          }
+          
           currentTweetId = tweet.in_reply_to_status_id_str;
           if (!tweetMap.has(currentTweetId)) break;
-        }
-
-        // If this thread starts with the last rendered tweet, remove it
-        if (thread.length > 0 && thread[0].id_str === lastRenderedTweetId) {
-          thread.shift();
         }
         
         // If no tweets left to render after removing duplicates, return empty string
@@ -305,21 +309,10 @@
 `;
 
       // Second pass: Render tweets in order, handling threads
-      let lastRenderedTweetId = null;
       for (const rootTweetId of rootTweets) {
-        const threadHtml = renderTweetThread(rootTweetId, lastRenderedTweetId);
+        const threadHtml = renderTweetThread(rootTweetId);
         if (threadHtml) {
           html += threadHtml;
-          // Update lastRenderedTweetId to the last tweet in this thread
-          const thread = [];
-          let currentTweetId = rootTweetId;
-          while (currentTweetId && tweetMap.has(currentTweetId)) {
-            thread.unshift(tweetMap.get(currentTweetId));
-            currentTweetId = tweetMap.get(currentTweetId).in_reply_to_status_id_str;
-          }
-          if (thread.length > 0) {
-            lastRenderedTweetId = thread[0].id_str;
-          }
         }
       }
 
