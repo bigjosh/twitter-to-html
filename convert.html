@@ -95,6 +95,82 @@
      * This HTML contains no JavaScript and references images in the `tweets_media` folder.
      */
     function generateStaticHTML(tweets) {
+      // First pass: Build a map of tweet IDs to tweets and find root tweets
+      const tweetMap = new Map();
+      const rootTweets = new Set();
+      
+      for (const item of tweets) {
+        const t = item.tweet || {};
+        if (t.id_str) {
+          tweetMap.set(t.id_str, t);
+          
+          // If this tweet is not a reply or is a reply to a tweet we don't have,
+          // consider it a root tweet
+          if (!t.in_reply_to_status_id_str || !tweetMap.has(t.in_reply_to_status_id_str)) {
+            rootTweets.add(t.id_str);
+          } else {
+            // If this is a reply to a tweet we have, remove the replied-to tweet
+            // from root tweets as it's part of a thread
+            rootTweets.delete(t.in_reply_to_status_id_str);
+          }
+        }
+      }
+
+      // Helper function to render a single tweet
+      function renderTweet(t, isThread = false) {
+        const createdAt = formatDate(t.created_at);
+        const textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
+        const textEscaped = escapeHtml(textDecoded);
+        const tweetId = t.id_str;
+        const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
+
+        // Check if this is a reply tweet
+        let replyHtml = '';
+        if (t.in_reply_to_status_id_str && t.in_reply_to_screen_name) {
+          // Only show reply info if it's not part of a thread we're displaying
+          if (!tweetMap.has(t.in_reply_to_status_id_str)) {
+            const replyUrl = `https://x.com/${escapeHtml(t.in_reply_to_screen_name)}/status/${t.in_reply_to_status_id_str}`;
+            replyHtml = `
+    <div class="tweet-reply-info">
+      In reply to <a href="${escapeHtml(replyUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(t.in_reply_to_screen_name)}</a>
+    </div>`;
+          }
+        }
+
+        // Build the media HTML, if any
+        const mediaHtml = getMediaHtml(t);
+
+        const threadClass = isThread ? ' thread-tweet' : '';
+        return `
+  <div class="tweet-container${threadClass}">${replyHtml}
+    <div class="tweet-time">${escapeHtml(createdAt)}</div>
+    <div class="tweet-text">${textEscaped}</div>
+    <div class="tweet-media">${mediaHtml}</div>
+    <div class="tweet-link">
+      <a href="${escapeHtml(tweetUrl)}" target="_blank" rel="noopener noreferrer">View on X.com</a>
+    </div>
+  </div>`;
+      }
+
+      // Helper function to render a tweet and all its replies that we have
+      function renderTweetThread(tweetId) {
+        const thread = [];
+        let currentTweetId = tweetId;
+        
+        // First, go up the reply chain to find the start of the thread
+        while (currentTweetId) {
+          const tweet = tweetMap.get(currentTweetId);
+          if (!tweet) break;
+          
+          thread.unshift(tweet); // Add to start of array
+          currentTweetId = tweet.in_reply_to_status_id_str;
+          if (!tweetMap.has(currentTweetId)) break;
+        }
+        
+        // Render the thread
+        return thread.map((t, index) => renderTweet(t, index < thread.length - 1)).join('\n');
+      }
+
       let html = `
 <!DOCTYPE html>
 <html>
@@ -116,6 +192,25 @@
       border: 1px solid #ddd;
       border-radius: 5px;
     }
+    .tweet-container.thread-tweet {
+      margin-bottom: 2px;
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+    .tweet-container.thread-tweet + .tweet-container {
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      margin-top: -1px;
+    }
+    .tweet-reply-info {
+      font-size: 0.85rem;
+      color: #555;
+      margin-bottom: 0.5rem;
+    }
+    .tweet-reply-info a {
+      color: #1da1f2;
+      text-decoration: none;
+    }
     .tweet-time {
       color: #555;
       font-size: 0.85rem;
@@ -135,52 +230,15 @@
       color: #1da1f2;
       text-decoration: none;
     }
-    .tweet-reply-info {
-      font-size: 0.85rem;
-      color: #555;
-      margin-bottom: 0.5rem;
-    }
-    .tweet-reply-info a {
-      color: #1da1f2;
-      text-decoration: none;
-    }
   </style>
 </head>
 <body>
   <h1>My Exported Tweets</h1>
 `;
 
-      for (const item of tweets) {
-        const t = item.tweet || {};
-        const createdAt = formatDate(t.created_at);
-        // Decode any HTML entities from the text so '>' doesn't remain &gt;
-        const textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
-        const textEscaped = escapeHtml(textDecoded);
-        const tweetId = t.id_str;
-        const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
-
-        // Check if this is a reply tweet
-        let replyHtml = '';
-        if (t.in_reply_to_status_id_str && t.in_reply_to_screen_name) {
-          const replyUrl = `https://x.com/${escapeHtml(t.in_reply_to_screen_name)}/status/${t.in_reply_to_status_id_str}`;
-          replyHtml = `
-    <div class="tweet-reply-info">
-      In reply to <a href="${escapeHtml(replyUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(t.in_reply_to_screen_name)}</a>
-    </div>`;
-        }
-
-        // Build the media HTML, if any
-        const mediaHtml = getMediaHtml(t);
-
-        html += `
-  <div class="tweet-container">${replyHtml}
-    <div class="tweet-time">${escapeHtml(createdAt)}</div>
-    <div class="tweet-text">${textEscaped}</div>
-    <div class="tweet-media">${mediaHtml}</div>
-    <div class="tweet-link">
-      <a href="${escapeHtml(tweetUrl)}" target="_blank" rel="noopener noreferrer">View on X.com</a>
-    </div>
-  </div>`;
+      // Second pass: Render tweets in order, handling threads
+      for (const rootTweetId of rootTweets) {
+        html += renderTweetThread(rootTweetId);
       }
 
       html += `
