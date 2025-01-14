@@ -29,6 +29,15 @@
       width: 100%;
       height: 300px;
     }
+    .note-tweet-section {
+      margin: 1rem 0;
+    }
+    #note-tweet-input {
+      margin: 1rem 0;
+      padding: 1rem;
+      background: #f0f0f0;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -37,6 +46,17 @@
     <p>Select your <code>tweets.js</code> (or <code>.json</code>) file to generate a static HTML archive.</p>
     <input type="file" id="file-input" accept=".js,.json" />
 
+    <p class="note-tweet-section">
+      <label>
+        <input type="checkbox" id="has-note-tweets" />
+        I have long tweets in <code>note-tweets.js</code>
+      </label>
+    </p>
+    <div id="note-tweet-input" style="display: none;">
+      <p>Select your <code>note-tweets.js</code> file:</p>
+      <input type="file" id="note-tweet-file" accept=".js,.json" />
+    </div>
+
     <div class="textarea-container">
       <p><strong>Generated HTML Output:</strong></p>
       <textarea id="output-textarea" placeholder="Your static HTML will appear here..." readonly></textarea>
@@ -44,6 +64,31 @@
   </div>
 
   <script>
+    // Global variable to store note tweets
+    let noteTweets = null;
+
+    // Show/hide note tweet file input based on checkbox
+    document.getElementById("has-note-tweets").addEventListener("change", function() {
+      document.getElementById("note-tweet-input").style.display = 
+        this.checked ? "block" : "none";
+    });
+
+    // Handle note tweet file selection
+    document.getElementById("note-tweet-file").addEventListener("change", async function() {
+      const file = this.files[0];
+      if (!file) return;
+
+      try {
+        const content = await file.text();
+        const cleanedContent = removePrefix(content);
+        noteTweets = JSON.parse(cleanedContent);
+      } catch (err) {
+        alert("Error loading note tweets: " + err.message);
+        console.error(err);
+        noteTweets = null;
+      }
+    });
+
     document.getElementById("file-input").addEventListener("change", async function() {
       const file = this.files[0];
       if (!file) return;
@@ -70,7 +115,7 @@
     });
 
     /**
-     * Removes `window.YTD.tweets.part0 = ` or similar prefix, if present, returning raw JSON text.
+     * Removes `window.YTD... = ` or similar prefix, if present, returning raw JSON text.
      */
     function removePrefix(content) {
       // Common patterns to remove:
@@ -123,7 +168,7 @@
       function renderTweet(t, isThread = false) {
         // Mark this tweet as rendered
         const createdAt = formatDate(t.created_at);
-        let textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
+        let textDecoded = decodeHtmlEntities(getFullTweetText(t));
 
         // Get media URLs to remove from text
         const mediaUrls = new Set();
@@ -404,6 +449,24 @@
       
       mediaHtml += '</div>';
       return mediaHtml;
+    }
+
+    /**
+     * Get the full tweet text, checking note-tweets.js if available
+     */
+    function getFullTweetText(tweet) {
+      // First check if this is a note tweet
+      if (noteTweets && tweet.id_str) {
+        const noteTweet = noteTweets.find(nt => 
+          nt.tweet && nt.tweet.id_str === tweet.id_str
+        );
+        if (noteTweet && noteTweet.tweet.note_tweet) {
+          return noteTweet.tweet.note_tweet.text;
+        }
+      }
+      
+      // If not a note tweet or note tweets not loaded, return original text
+      return tweet.full_text || "(No text)";
     }
 
     /**
