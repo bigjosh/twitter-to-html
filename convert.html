@@ -119,7 +119,33 @@
       // Helper function to render a single tweet
       function renderTweet(t, isThread = false) {
         const createdAt = formatDate(t.created_at);
-        const textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
+        let textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
+
+        // Get media URLs to remove from text
+        const mediaUrls = new Set();
+        if (t.entities && Array.isArray(t.entities.media)) {
+          t.entities.media.forEach(m => {
+            if (m.url) {
+              mediaUrls.add(m.url);
+            }
+          });
+        }
+        if (t.extended_entities && Array.isArray(t.extended_entities.media)) {
+          t.extended_entities.media.forEach(m => {
+            if (m.url) {
+              mediaUrls.add(m.url);
+            }
+          });
+        }
+
+        // Remove media URLs from text
+        mediaUrls.forEach(url => {
+          textDecoded = textDecoded.replace(url, '');
+        });
+
+        // Trim any extra whitespace that might be left after removing URLs
+        textDecoded = textDecoded.trim();
+        
         const textEscaped = escapeHtml(textDecoded);
         const tweetId = t.id_str;
         const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
