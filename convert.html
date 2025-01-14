@@ -43,19 +43,8 @@
 <body>
   <div class="container">
     <h1>Twitter Export to Static HTML</h1>
-    <p>Select your <code>tweets.js</code> (or <code>.json</code>) file to generate a static HTML archive.</p>
-    <input type="file" id="file-input" accept=".js,.json" />
-
-    <p class="note-tweet-section">
-      <label>
-        <input type="checkbox" id="has-note-tweets" />
-        I have long tweets in <code>note-tweets.js</code>
-      </label>
-    </p>
-    <div id="note-tweet-input" style="display: none;">
-      <p>Select your <code>note-tweets.js</code> file:</p>
-      <input type="file" id="note-tweet-file" accept=".js,.json" />
-    </div>
+    <p>Select your <code>tweets.js</code> file and optionally your <code>note-tweets.js</code> file. If you don't include the note-tweets file, any tweets longer than the Twitter max limit will be truncated in the output, but there will be a link to view the full tweet on twitter.com.</p>
+    <input type="file" id="file-input" accept=".js,.json" multiple />
 
     <div class="textarea-container">
       <p><strong>Generated HTML Output:</strong></p>
@@ -67,40 +56,32 @@
     // Global variable to store note tweets
     let noteTweets = null;
 
-    // Show/hide note tweet file input based on checkbox
-    document.getElementById("has-note-tweets").addEventListener("change", function() {
-      document.getElementById("note-tweet-input").style.display = 
-        this.checked ? "block" : "none";
-    });
-
-    // Handle note tweet file selection
-    document.getElementById("note-tweet-file").addEventListener("change", async function() {
-      const file = this.files[0];
-      if (!file) return;
-
-      try {
-        const content = await file.text();
-        const cleanedContent = removePrefix(content);
-        noteTweets = JSON.parse(cleanedContent);
-      } catch (err) {
-        alert("Error loading note tweets: " + err.message);
-        console.error(err);
-        noteTweets = null;
-      }
-    });
-
     document.getElementById("file-input").addEventListener("change", async function() {
-      const file = this.files[0];
-      if (!file) return;
+      const files = Array.from(this.files);
+      if (files.length === 0) return;
 
       try {
-        // Read the file as text
-        const fileContent = await file.text();
+        // Find the tweets.js file (required)
+        const tweetsFile = files.find(f => f.name.includes('tweets.js') && !f.name.includes('note-tweets'));
+        if (!tweetsFile) {
+          throw new Error("Please select your tweets.js file");
+        }
 
-        // Attempt to remove any `window.YTD... = ` prefix if present, leaving valid JSON
-        const cleanedContent = removePrefix(fileContent);
+        // Look for note-tweets.js (optional)
+        const noteTweetsFile = files.find(f => f.name.includes('note-tweets'));
+        
+        // Load note tweets if available
+        if (noteTweetsFile) {
+          const noteContent = await noteTweetsFile.text();
+          const cleanedNoteContent = removePrefix(noteContent);
+          noteTweets = JSON.parse(cleanedNoteContent);
+        } else {
+          noteTweets = null;
+        }
 
-        // Parse JSON
+        // Load main tweets
+        const tweetsContent = await tweetsFile.text();
+        const cleanedContent = removePrefix(tweetsContent);
         const tweetsArray = JSON.parse(cleanedContent);
 
         // Generate the static HTML
@@ -466,7 +447,13 @@
       }
       
       // If not a note tweet or note tweets not loaded, return original text
-      return tweet.full_text || "(No text)";
+      // and add a visual indicator if the tweet appears to be truncated
+      const text = tweet.full_text || "(No text)";
+      if (text.endsWith('…') && !noteTweets) {
+        return text + ' <a href="https://x.com/i/web/status/' + tweet.id_str + 
+               '" target="_blank" rel="noopener noreferrer">(click to read full tweet)</a>';
+      }
+      return text;
     }
 
     /**
