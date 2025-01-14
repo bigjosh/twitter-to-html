@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Twitter Export to Static HTML</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem auto;
+      max-width: 640px;
+      text-align: center;
+    }
+    .container {
+      border: 1px solid #ccc;
+      padding: 1rem;
+      background: #f9f9f9;
+      border-radius: 8px;
+    }
+    h1 {
+      margin-bottom: 1rem;
+    }
+    #file-input {
+      margin-bottom: 1rem;
+    }
+    .textarea-container {
+      margin-top: 1rem;
+    }
+    textarea {
+      width: 100%;
+      height: 300px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Twitter Export to Static HTML</h1>
+    <p>Select your <code>tweets.js</code> (or <code>.json</code>) file to generate a static HTML archive.</p>
+    <input type="file" id="file-input" accept=".js,.json" />
+
+    <div class="textarea-container">
+      <p><strong>Generated HTML Output:</strong></p>
+      <textarea id="output-textarea" placeholder="Your static HTML will appear here..." readonly></textarea>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById("file-input").addEventListener("change", async function() {
+      const file = this.files[0];
+      if (!file) return;
+
+      try {
+        // Read the file as text
+        const fileContent = await file.text();
+
+        // Attempt to remove any `window.YTD... = ` prefix if present, leaving valid JSON
+        const cleanedContent = removePrefix(fileContent);
+
+        // Parse JSON
+        const tweetsArray = JSON.parse(cleanedContent);
+
+        // Generate the static HTML
+        const staticHTML = generateStaticHTML(tweetsArray);
+
+        // Display it in the textarea
+        document.getElementById("output-textarea").value = staticHTML;
+      } catch (err) {
+        alert("Error: " + err.message);
+        console.error(err);
+      }
+    });
+
+    /**
+     * Removes `window.YTD.tweets.part0 = ` or similar prefix, if present, returning raw JSON text.
+     */
+    function removePrefix(content) {
+      // Common patterns to remove:
+      // e.g. window.YTD.tweets.part0 = [...];
+      // You can adapt the regex for other variations
+      return content
+        .replace(/^window\.YTD\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*=\s*/, "") // remove prefix
+        .replace(/;\s*$/, ""); // remove trailing semicolon if any
+    }
+
+    /**
+     * Generates a complete static HTML document from an array of tweet objects.
+     * This HTML contains no JavaScript and references images in the `tweets_media` folder.
+     */
+    function generateStaticHTML(tweets) {
+      let html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>My Exported Tweets</title>
+  <style>
+    body {
+      margin: 2rem auto;
+      max-width: 600px;
+      font-family: sans-serif;
+      line-height: 1.4;
+      background: #f9f9f9;
+    }
+    .tweet-container {
+      background: #fff;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    .tweet-time {
+      color: #555;
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+    .tweet-text {
+      margin-bottom: 0.5rem;
+      white-space: pre-wrap;
+    }
+    .tweet-media img {
+      max-width: 100%;
+      display: block;
+      margin: 0.5rem 0;
+    }
+    .tweet-link a {
+      font-size: 0.85rem;
+      color: #1da1f2;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>My Exported Tweets</h1>
+`;
+
+      for (const item of tweets) {
+        const t = item.tweet || {};
+        const createdAt = formatDate(t.created_at);
+        // Decode any HTML entities from the text so '>' doesn't remain &gt;
+        const textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
+        const tweetId = t.id_str;
+        const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
+
+        // Build the media HTML, if any
+        const mediaHtml = getMediaHtml(t);
+
+        html += `
+  <div class="tweet-container">
+    <div class="tweet-time">${createdAt}</div>
+    <div class="tweet-text">${textDecoded}</div>
+    <div class="tweet-media">${mediaHtml}</div>
+    <div class="tweet-link">
+      <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">View on X.com</a>
+    </div>
+  </div>`;
+      }
+
+      html += `
+</body>
+</html>
+`;
+      return html;
+    }
+
+    /**
+     * Decodes common HTML entities (e.g. &amp;, &gt;, &lt;, etc.) so that
+     * Twitter-escaped text will be rendered properly.
+     */
+    function decodeHtmlEntities(str) {
+      const textarea = document.createElement("textarea");
+      textarea.innerHTML = str;
+      return textarea.value;
+    }
+
+    /**
+     * Attempts to get media from `extended_entities.media` or `entities.media`.
+     * Returns HTML <img> tags referencing `tweets_media/<filename>`.
+     */
+    function getMediaHtml(tweet) {
+      let media = [];
+      // Check extended_entities first
+      if (tweet.extended_entities && tweet.extended_entities.media) {
+        media = tweet.extended_entities.media;
+      }
+      // Then fall back to entities.media
+      else if (tweet.entities && tweet.entities.media) {
+        media = tweet.entities.media;
+      }
+
+      if (!Array.isArray(media) || media.length === 0) {
+        return "";
+      }
+
+      let mediaHtml = "";
+      media.forEach(m => {
+        if (!m.media_url) return;
+        const filename = m.media_url.split("/").pop(); // naive approach to get the file name
+        // For images only; adjust logic if you have videos/GIFs
+        mediaHtml += `<img src="tweets_media/${filename}" alt="Tweet media" />`;
+      });
+      return mediaHtml;
+    }
+
+    /**
+     * Utility: formats the date string from Twitter's "created_at" field.
+     */
+    function formatDate(dateStr) {
+      const d = new Date(dateStr);
+      if (isNaN(d)) {
+        // fallback if invalid
+        return dateStr || "(Unknown date)";
+      }
+      // Show local date/time
+      return d.toLocaleString();
+    }
+  </script>
+</body>
+</html>
+
