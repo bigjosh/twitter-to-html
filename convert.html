@@ -321,8 +321,11 @@
         const height = m.sizes?.large?.h || m.sizes?.medium?.h || 400;
         
         if (mediaType === 'photo') {
+          // Construct the correct path: tweets_media/tweet_id-filename
+          const mediaPath = `tweets_media/${tweet.id_str}-${filename}`;
+          
           mediaHtml += `  <div class="media-item">
-    <img src="tweets_media/${filename}" 
+    <img src="${mediaPath}" 
          alt="Tweet media" 
          width="${width}" 
          height="${height}"
