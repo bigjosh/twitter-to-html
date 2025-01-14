@@ -82,6 +82,15 @@
     }
 
     /**
+     * Escapes HTML special characters in a string
+     */
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    /**
      * Generates a complete static HTML document from an array of tweet objects.
      * This HTML contains no JavaScript and references images in the `tweets_media` folder.
      */
@@ -137,6 +146,7 @@
         const createdAt = formatDate(t.created_at);
         // Decode any HTML entities from the text so '>' doesn't remain &gt;
         const textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
+        const textEscaped = escapeHtml(textDecoded);
         const tweetId = t.id_str;
         const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
 
@@ -145,13 +155,14 @@
 
         html += `
   <div class="tweet-container">
-    <div class="tweet-time">${createdAt}</div>
-    <div class="tweet-text">${textDecoded}</div>
+    <div class="tweet-time">${escapeHtml(createdAt)}</div>
+    <div class="tweet-text">${textEscaped}</div>
     <div class="tweet-media">${mediaHtml}</div>
     <div class="tweet-link">
-      <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">View on X.com</a>
+      <a href="${escapeHtml(tweetUrl)}" target="_blank" rel="noopener noreferrer">View on X.com</a>
     </div>
-  </div>`;
+  </div>
+`;
       }
 
       html += `
@@ -215,4 +226,3 @@
   </script>
 </body>
 </html>
-
