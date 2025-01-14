@@ -116,13 +116,12 @@
         }
       }
 
-      // Keep track of all rendered tweets to prevent duplicates
-      const renderedTweets = new Set();
+      // Keep track of the last sequence of tweets rendered
+      let lastSequence = [];
 
       // Helper function to render a single tweet
       function renderTweet(t, isThread = false) {
         // Mark this tweet as rendered
-        renderedTweets.add(t.id_str);
         const createdAt = formatDate(t.created_at);
         let textDecoded = decodeHtmlEntities(t.full_text || "(No text)");
 
@@ -192,23 +191,34 @@
         while (currentTweetId) {
           const tweet = tweetMap.get(currentTweetId);
           if (!tweet) break;
-          
-          // Only include tweets we haven't rendered yet
-          if (!renderedTweets.has(tweet.id_str)) {
-            thread.unshift(tweet); // Add to start of array
-          }
-          
+          thread.unshift(tweet); // Add to start of array
           currentTweetId = tweet.in_reply_to_status_id_str;
           if (!tweetMap.has(currentTweetId)) break;
         }
-        
-        // If no tweets left to render after removing duplicates, return empty string
-        if (thread.length === 0) {
+
+        // Compare with last sequence and remove any duplicates from the start
+        let startIndex = 0;
+        if (lastSequence.length > 0) {
+          // Find how many tweets from the start match the last sequence
+          while (startIndex < thread.length && 
+                 startIndex < lastSequence.length && 
+                 thread[startIndex].id_str === lastSequence[startIndex].id_str) {
+            startIndex++;
+          }
+        }
+
+        // If all tweets were duplicates, return empty string
+        if (startIndex === thread.length) {
           return '';
         }
+
+        // Update the last sequence to this thread
+        lastSequence = thread;
         
-        // Render the thread
-        return thread.map((t, index) => renderTweet(t, index < thread.length - 1)).join('\n');
+        // Render only the non-duplicate tweets
+        return thread.slice(startIndex)
+                    .map((t, index, arr) => renderTweet(t, index < arr.length - 1))
+                    .join('\n');
       }
 
       let html = `
@@ -313,6 +323,10 @@
         const threadHtml = renderTweetThread(rootTweetId);
         if (threadHtml) {
           html += threadHtml;
+        } else {
+          // If no tweets were rendered, clear the last sequence
+          // This ensures tweets will be repeated if they're not directly consecutive
+          lastSequence = [];
         }
       }
 
