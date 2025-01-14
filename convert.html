@@ -225,6 +225,14 @@
       position: relative;
       overflow: hidden;
     }
+    .media-item a {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .media-item a:hover {
+      opacity: 0.9;
+    }
     .media-item img {
       width: 100%;
       height: 100%;
@@ -322,14 +330,16 @@
         
         if (mediaType === 'photo') {
           // Construct the correct path: tweets_media/tweet_id-filename
-          const mediaPath = `tweets_media/${tweet.id_str}-${filename}`;
+          const mediaPath = `data/tweets_media/${tweet.id_str}-${filename}`;
           
           mediaHtml += `  <div class="media-item">
-    <img src="${mediaPath}" 
-         alt="Tweet media" 
-         width="${width}" 
-         height="${height}"
-         loading="lazy" />
+    <a href="${mediaPath}" target="_blank" rel="noopener noreferrer">
+      <img src="${mediaPath}" 
+           alt="Tweet media" 
+           width="${width}" 
+           height="${height}"
+           loading="lazy" />
+    </a>
   </div>\n`;
         }
         // Add support for other media types here if needed
