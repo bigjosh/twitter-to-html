@@ -62,19 +62,30 @@
 
       try {
         // Find the tweets.js file (required)
-        const tweetsFile = files.find(f => f.name.includes('tweets.js') && !f.name.includes('note-tweets'));
+        const tweetsFile = files.find(f => 
+          f.name.toLowerCase().includes('tweets.js') && 
+          !f.name.toLowerCase().includes('note-tweets')
+        );
         if (!tweetsFile) {
           throw new Error("Please select your tweets.js file");
         }
 
         // Look for note-tweets.js (optional)
-        const noteTweetsFile = files.find(f => f.name.includes('note-tweets'));
+        const noteTweetsFile = files.find(f => 
+          f.name.toLowerCase().includes('note-tweets')
+        );
         
         // Load note tweets if available
         if (noteTweetsFile) {
           const noteContent = await noteTweetsFile.text();
           const cleanedNoteContent = removePrefix(noteContent);
-          noteTweets = JSON.parse(cleanedNoteContent);
+          try {
+            noteTweets = JSON.parse(cleanedNoteContent);
+            console.log('Loaded note tweets:', noteTweets.length);
+          } catch (e) {
+            console.error('Error parsing note tweets:', e);
+            noteTweets = null;
+          }
         } else {
           noteTweets = null;
         }
@@ -338,6 +349,17 @@
       color: #1da1f2;
       text-decoration: none;
     }
+    .truncated-note {
+      font-size: 0.9em;
+      color: #536471;
+    }
+    .truncated-note a {
+      color: #1da1f2;
+      text-decoration: none;
+    }
+    .truncated-note a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
@@ -438,20 +460,20 @@
     function getFullTweetText(tweet) {
       // First check if this is a note tweet
       if (noteTweets && tweet.id_str) {
+        // Find matching note tweet
         const noteTweet = noteTweets.find(nt => 
-          nt.tweet && nt.tweet.id_str === tweet.id_str
+          nt && nt.tweet && nt.tweet.id === tweet.id_str
         );
-        if (noteTweet && noteTweet.tweet.note_tweet) {
-          return noteTweet.tweet.note_tweet.text;
+        if (noteTweet && noteTweet.tweet && noteTweet.tweet.note_tweet) {
+          return noteTweet.tweet.note_tweet.text || tweet.full_text;
         }
       }
       
       // If not a note tweet or note tweets not loaded, return original text
-      // and add a visual indicator if the tweet appears to be truncated
       const text = tweet.full_text || "(No text)";
       if (text.endsWith('…') && !noteTweets) {
-        return text + ' <a href="https://x.com/i/web/status/' + tweet.id_str + 
-               '" target="_blank" rel="noopener noreferrer">(click to read full tweet)</a>';
+        const tweetUrl = `https://twitter.com/i/web/status/${tweet.id_str}`;
+        return `${text} <span class="truncated-note">(<a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">read full tweet on twitter.com</a>)</span>`;
       }
       return text;
     }
