@@ -179,7 +179,7 @@
       }
 
       // Helper function to render a tweet and all its replies that we have
-      function renderTweetThread(tweetId) {
+      function renderTweetThread(tweetId, lastRenderedTweetId) {
         const thread = [];
         let currentTweetId = tweetId;
         
@@ -191,6 +191,16 @@
           thread.unshift(tweet); // Add to start of array
           currentTweetId = tweet.in_reply_to_status_id_str;
           if (!tweetMap.has(currentTweetId)) break;
+        }
+
+        // If this thread starts with the last rendered tweet, remove it
+        if (thread.length > 0 && thread[0].id_str === lastRenderedTweetId) {
+          thread.shift();
+        }
+        
+        // If no tweets left to render after removing duplicates, return empty string
+        if (thread.length === 0) {
+          return '';
         }
         
         // Render the thread
@@ -295,8 +305,22 @@
 `;
 
       // Second pass: Render tweets in order, handling threads
+      let lastRenderedTweetId = null;
       for (const rootTweetId of rootTweets) {
-        html += renderTweetThread(rootTweetId);
+        const threadHtml = renderTweetThread(rootTweetId, lastRenderedTweetId);
+        if (threadHtml) {
+          html += threadHtml;
+          // Update lastRenderedTweetId to the last tweet in this thread
+          const thread = [];
+          let currentTweetId = rootTweetId;
+          while (currentTweetId && tweetMap.has(currentTweetId)) {
+            thread.unshift(tweetMap.get(currentTweetId));
+            currentTweetId = tweetMap.get(currentTweetId).in_reply_to_status_id_str;
+          }
+          if (thread.length > 0) {
+            lastRenderedTweetId = thread[0].id_str;
+          }
+        }
       }
 
       html += `
