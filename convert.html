@@ -135,6 +135,15 @@
       color: #1da1f2;
       text-decoration: none;
     }
+    .tweet-reply-info {
+      font-size: 0.85rem;
+      color: #555;
+      margin-bottom: 0.5rem;
+    }
+    .tweet-reply-info a {
+      color: #1da1f2;
+      text-decoration: none;
+    }
   </style>
 </head>
 <body>
@@ -150,19 +159,28 @@
         const tweetId = t.id_str;
         const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
 
+        // Check if this is a reply tweet
+        let replyHtml = '';
+        if (t.in_reply_to_status_id_str && t.in_reply_to_screen_name) {
+          const replyUrl = `https://x.com/${escapeHtml(t.in_reply_to_screen_name)}/status/${t.in_reply_to_status_id_str}`;
+          replyHtml = `
+    <div class="tweet-reply-info">
+      In reply to <a href="${escapeHtml(replyUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(t.in_reply_to_screen_name)}</a>
+    </div>`;
+        }
+
         // Build the media HTML, if any
         const mediaHtml = getMediaHtml(t);
 
         html += `
-  <div class="tweet-container">
+  <div class="tweet-container">${replyHtml}
     <div class="tweet-time">${escapeHtml(createdAt)}</div>
     <div class="tweet-text">${textEscaped}</div>
     <div class="tweet-media">${mediaHtml}</div>
     <div class="tweet-link">
       <a href="${escapeHtml(tweetUrl)}" target="_blank" rel="noopener noreferrer">View on X.com</a>
     </div>
-  </div>
-`;
+  </div>`;
       }
 
       html += `
