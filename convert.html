@@ -105,9 +105,15 @@
         // Display it in the textarea
         document.getElementById("output-textarea").value = staticHTML;
 
-       // Open HTML in new tab
-       // TODO: Make a button for this
-        openHtmlInNewTab(staticHTML);
+        // Create an "Open in New Tab" button if it doesn't exist
+        let openButton = document.getElementById("open-tab-button");
+        if (!openButton) {
+          openButton = document.createElement("button");
+          openButton.id = "open-tab-button";
+          openButton.textContent = "Open in New Tab";
+          openButton.onclick = () => openHtmlInNewTab(staticHTML);
+          document.getElementById("output-textarea").insertAdjacentElement('afterend', openButton);
+        }
 
       } catch (err) {
         alert("Error: " + err.message);
@@ -165,10 +171,6 @@
 
       });
     
-      // Just log the result to make sure it works
-      tweets.forEach (tweet => {
-        console.log( tweet.id_str.padStart(20, '0') +"=" +tweet.timestamp.getTime().toString().padStart(11, '0') + tweet.sequence.toString().padStart(7, '0') );
-      });
 
       // If we were passed notes, then build a map of the text part so we can later look to find a matching tweet
 
@@ -188,6 +190,7 @@
       // Build a map of tweet IDs to tweets so we can later find replies
       const tweetMap = new Map();
 
+      // TODO: do we need this?
       tweets.forEach(tweet => {
         tweetMap.set(tweet.id_str, tweet);
       });
@@ -251,6 +254,35 @@
         text = text.trim();
 
         // Text is now the short tweet with media URLs removed
+        
+        // Next remove any leading mentions. We will add them as a different element from the usermentions array in entities. 
+        // Not only do they look ugly at the begining there, they will also break our ability to find this tweet in notetweets
+
+        while (text.startsWith('@')) {
+          // Find the end of the username (space or end of string)
+          let spaceIndex = text.indexOf(' ');
+          if (spaceIndex === -1) {
+              text = '';  // If no space found, the entire text is a mention
+              break;
+          }
+          // Skip the mention and the following space
+          text = text.slice(spaceIndex + 1).trimStart();          
+        }
+
+        console.log( "t:" + JSON.stringify(t, null, 4) );
+        console.log( "entities:" + JSON.stringify(t.entities, null, 4) );
+        if (t.entities && t.entities.user_mentions) console.log( "entities+mentions:" + JSON.stringify(t.entities.user_mentions, null, 4) );
+
+        // now create the html for the mentions section
+        let mentionsHtml = '';
+        if (t.entities && t.entities.user_mentions && t.entities.user_mentions.length > 0) {
+          console.log("making table");  
+          mentionsHtml += `<table>\r`;              
+          t.entities.user_mentions.forEach(m => {
+            mentionsHtml += ` <tr><td><a href="https://x.com/${m.screen_name}" target="_blank" rel="noopener noreferrer">@${m.screen_name}</a></td><td>${m.name}</td></tr>\r`;              
+          });
+          mentionsHtml += `</table>\r`;              
+        }
               
         // text now has external embeded URLs expaned and media URLs removed and any trailing spaces removed.
         // This should be 
@@ -269,26 +301,41 @@
         let replyHtml = '';
 
         // Suppress the reply to line if this is in a thread (so it is obviously a reply to the tweet above it)
-        if (t.in_reply_to_status_id_str && !isThread) {
-  
+        if (t.in_reply_to_status_id_str && !isThread) {  
           const replyUrl = `https://x.com/${t.in_reply_to_screen_name}/status/${t.in_reply_to_status_id_str}`;
-          replyHtml = `
-            <div class="tweet-reply-info">
-              In reply to <a href="${replyUrl}" target="_blank" rel="noopener noreferrer">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>
-            </div>`;
+          replyHtml = `In reply to <a href="${replyUrl}" target="_blank" rel="noopener noreferrer">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>`;
         }
 
         // Build the media HTML, if any
         const mediaHtml = getMediaHtml(t);
 
+        // Note that below we do not use a div for the mentions table since it is usually not present so no need to waste that space unless needed
+
         const threadClass = isThread ? ' thread-tweet' : '';
-        return `
-          <div class="tweet-container${threadClass}" id="tweet-${tweetId}">
-            <div class="tweet-time"> <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">${createdAt}</a> </div>
-            <div class="tweet-reply-info">${replyHtml}</div>
-            <div class="tweet-text">${escapeSpecialCharsToHtml(text)}</div>
-            <div class="tweet-media">${mediaHtml}</div>
-          </div>`;
+
+        // Finally we will build up the final html for the tweet so we can return it. 
+
+        let tweetHTML = "";
+
+        tweetHTML += `<div class="tweet-container${threadClass}" id="tweet-${tweetId}">\r`;
+        tweetHTML += `  <div class="tweet-time"> <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">${createdAt}</a> </div>\r`;  
+
+        if (replyHtml) {
+          tweetHTML += `  <div class="tweet-reply-info">${replyHtml}</div>\r`;  
+        }
+
+        if (mentionsHtml) {  
+          tweetHTML += `   <div class="tweet-mentions">${mentionsHtml}</div>\r`;  
+        }
+
+        tweetHTML += `   <div class="tweet-text">${escapeSpecialCharsToHtml(text)}</div>\r`;
+
+        if (mediaHtml) {
+          tweetHTML += `   <div class="tweet-media">${mediaHtml}</div>\r`;
+        }
+        tweetHTML += `</div>\r`;
+
+        return tweetHTML;
       }
 
       // Helper function to render a tweet and all its replies that we have
@@ -417,6 +464,25 @@
               font-size: 0.85rem;
               color: #1da1f2;
               text-decoration: none;
+            }
+            .tweet-mentions {
+              margin-top: -0.5rem;
+              margin-bottom: 1rem;
+              font-size: 0.9rem;
+              color: #536471;
+            }
+            .tweet-mentions table {
+              border-collapse: collapse;
+            }
+            .tweet-mentions td {
+              padding: 0.2rem 1rem 0.2rem 0;
+            }
+            .tweet-mentions a {
+              text-decoration: none;
+              color: #1DA1F2;
+            }
+            .tweet-mentions a:hover {
+              text-decoration: underline;
             }
           </style>
         </head>
