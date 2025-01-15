@@ -53,63 +53,11 @@
   </div>
 
   <script>
-    // Global variable to store note tweets
-    let noteTweets = null;
-
-    document.getElementById("file-input").addEventListener("change", async function() {
-      const files = Array.from(this.files);
-      if (files.length === 0) return;
-
-      try {
-        // Find the tweets.js file (required)
-        const tweetsFile = files.find(f => 
-          f.name.toLowerCase().includes('tweets.js') && 
-          !f.name.toLowerCase().includes('note-tweets')
-        );
-        if (!tweetsFile) {
-          throw new Error("Please select your tweets.js file");
-        }
-
-        // Look for note-tweets.js (optional)
-        const noteTweetsFile = files.find(f => 
-          f.name.toLowerCase().includes('note-tweets')
-        );
-        
-        // Load note tweets if available
-        if (noteTweetsFile) {
-          const noteContent = await noteTweetsFile.text();
-          const cleanedNoteContent = removePrefix(noteContent);
-          try {
-            noteTweets = JSON.parse(cleanedNoteContent);
-            console.log('Loaded note tweets:', noteTweets.length);
-          } catch (e) {
-            console.error('Error parsing note tweets:', e);
-            noteTweets = null;
-          }
-        } else {
-          noteTweets = null;
-        }
-
-        // Load main tweets
-        const tweetsContent = await tweetsFile.text();
-        const cleanedContent = removePrefix(tweetsContent);
-        const tweetsArray = JSON.parse(cleanedContent);
-
-        // Generate the static HTML
-        const staticHTML = generateStaticHTML(tweetsArray);
-
-        // Display it in the textarea
-        document.getElementById("output-textarea").value = staticHTML;
-      } catch (err) {
-        alert("Error: " + err.message);
-        console.error(err);
-      }
-    });
 
     /**
      * Removes `window.YTD... = ` or similar prefix, if present, returning raw JSON text.
      */
-    function removePrefix(content) {
+    function removeJavaScriptPrefix(content) {
       // Common patterns to remove:
       // e.g. window.YTD.tweets.part0 = [...];
       // You can adapt the regex for other variations
@@ -118,26 +66,138 @@
         .replace(/;\s*$/, ""); // remove trailing semicolon if any
     }
 
+    // Global variable to store note tweets in a map where the key is the cleaned noteTweet text
+    // Defaults to null becuase it is optional for the user to pass a notes-tweets.js file
+    let notesArray = null;
+
+    document.getElementById("file-input").addEventListener("change", async function() {
+      const files = Array.from(this.files);
+      if (files.length === 0) return;
+
+      try {
+        // Find the tweets.js file (required)
+        const tweetsFile = files.find(f => f.name.toLowerCase() === 'tweets.js');
+        if (!tweetsFile) {
+          throw new Error("Please select your tweets.js file");
+        }
+
+        // Load main tweets into tweetsArray
+        tweetsContent = await tweetsFile.text();
+        tweetsContentCleaned = removeJavaScriptPrefix(tweetsContent);
+        tweetsContent = null;   // Free up memory
+        const tweetsArray = JSON.parse(tweetsContentCleaned).map( o=> o.tweet );    // Every tweet is in an object called `tweet`, so flatten that out for simplicity
+        tweetsContentCleaned = null;  // Free up memory
+
+        // Look for note-tweets.js (optional)
+        const noteTweetsFile = files.find(f => f.name.toLowerCase() === 'note-tweets.js');
+        
+        // Load note tweets if available
+        if (noteTweetsFile) {
+          const noteContent = await noteTweetsFile.text();
+          const noteCleanContent = removeJavaScriptPrefix(noteContent);   // Remove the varabile name at the top of the file so just pure JSON
+          notesArray = JSON.parse( noteContent).map( o=> o.noteTweet );    // Every noteTweet is in an object called `noteTweet`, so flatten that out for simplicity            
+        }
+
+
+        // Generate the static HTML
+        const staticHTML = generateStaticHTML(tweetsArray,notesArray);
+
+        // Display it in the textarea
+        document.getElementById("output-textarea").value = staticHTML;
+
+       // Open HTML in new tab
+       // TODO: Make a button for this
+        openHtmlInNewTab(staticHTML);
+
+      } catch (err) {
+        alert("Error: " + err.message);
+        console.error(err);
+      }
+    });
+
+
     /**
      * Escapes HTML special characters in a string
+     * The tweets.js already has some chars escaped like ampersand and gt and lt
+     * but it does not escape carridge return or quotes.
+     * TODO: Are there others?  
      */
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
+    function escapeSpecialCharsToHtml(str) {
+      return str.replace("\n", "<br>").replace("\"", "&quot;");
     }
 
     /**
      * Generates a complete static HTML document from an array of tweet objects.
      * This HTML contains no JavaScript and references images in the `tweets_media` folder.
+     * notes will be null if no notes-tweets.js file was included
      */
-    function generateStaticHTML(tweets) {
-      // First pass: Build a map of tweet IDs to tweets and find root tweets
+    function generateStaticHTML(tweets,notes) {
+
+      count = 0;
+
+      // First lets get the date into a normalized format for all the tweets
+      // We also need to add a sequence number so we can keep tweet strorms in thier orginal ordering (they have idential timestamps and the ID numbers are not monotonically increasing)
+      tweets.forEach (tweet => {
+        tweet.timestamp = new Date(tweet.created_at);        
+        tweet.sequence = count;
+        count = count + 1;
+      });
+
+      // Now we can sort the tweets by date, oldest first.
+      // This makes displaying tweetstorms more natural, and also maybe better for SEO?
+      // TODO: Should we also delete the `created_at` property as we go to save space?
+
+      // It seems that tweetstorms all get the same timestamp, so we add `id_str` to break ties 
+      // Assumes that tweet IDs are assigned monotonically. IS that true?
+
+      // Highest time number is 2^32 = 10 digits
+      // Assume no one has more than 10 million tweets
+
+      tweets = tweets.sort((a, b) =>  {
+
+        // If two tweets have the same timestamp, the one that came earlier in the tweet.js file should come first
+        if (a.timestamp.getTime() === b.timestamp.getTime()) {
+          return b.sequence - a.sequence;  // Highest sequnce first since threaded tweets come in inverse order int tweets.js
+        }
+
+        // Sort by timestamp, oldest first
+        return a.timestamp.getTime() - b.timestamp.getTime();     
+
+      });
+    
+      // Just log the result to make sure it works
+      tweets.forEach (tweet => {
+        console.log( tweet.id_str.padStart(20, '0') +"=" +tweet.timestamp.getTime().toString().padStart(11, '0') + tweet.sequence.toString().padStart(7, '0') );
+      });
+
+      // If we were passed notes, then build a map of the text part so we can later look to find a matching tweet
+
+      // We need a map becuase the long note might have URLs in it and if those URLs are past the end of the shortened
+      // tweet then we need to get them from `ulrs` in the noteTweet
+          
+      let notesMap = null;        // Will be null if no notes-tweets.js file was included
+      if (notes) {
+        notesArray = notes;
+        notesMap = new Map();
+        notesArray.forEach(note => {
+            notesMap.set( note.noteTweet.core.text , note);   // Store the original long text as key and a ref to the full note as element
+        });
+      }
+
+
+      // Build a map of tweet IDs to tweets so we can later find replies
       const tweetMap = new Map();
-      const rootTweets = new Set();
+
+      tweets.forEach(tweet => {
+        tweetMap.set(tweet.id_str, tweet);
+      });
       
+      
+/*
+
       for (const item of tweets) {
         const t = item.tweet || {};
+
         if (t.id_str) {
           tweetMap.set(t.id_str, t);
           
@@ -150,19 +210,19 @@
             // from root tweets as it's part of a thread
             rootTweets.delete(t.in_reply_to_status_id_str);
           }
+        } else {
+          console.log(`Error: Tweet ID not found in tweet object: ${JSON.stringify(item)}`);
         }
       }
-
-      // Keep track of the last sequence of tweets rendered
-      let lastSequence = [];
+*/
 
       // Helper function to render a single tweet
       function renderTweet(t, isThread = false) {
-        // Mark this tweet as rendered
-        const createdAt = formatDate(t.created_at);
-        let textDecoded = decodeHtmlEntities(getFullTweetText(t));
 
-        // Get media URLs to remove from text
+        const createdAt = formatDate(t.timestamp);
+
+        // Get the media URLs for this tweet
+        // Seams like entities and extended_entities are rendundant? We use a set so it doesn't matter. 
         const mediaUrls = new Set();
         if (t.entities && Array.isArray(t.entities.media)) {
           t.entities.media.forEach(m => {
@@ -180,28 +240,42 @@
         }
 
         // Remove media URLs from text
+        // We only need to do this in the short tweet since it seems media is not included in the long note tweet
+        let text = t.full_text;
+
         mediaUrls.forEach(url => {
-          textDecoded = textDecoded.replace(url, '');
+          text = text.replace(url, '');
         });
 
         // Trim any extra whitespace that might be left after removing URLs
-        textDecoded = textDecoded.trim();
+        text = text.trim();
+
+        // Text is now the short tweet with media URLs removed
+              
+        // text now has external embeded URLs expaned and media URLs removed and any trailing spaces removed.
+        // This should be 
+
+
+        // TODO: Check if this is a note tweet and if so replace the text
+
+        // TODO: After we check if it is a note, then exapnd any embeded URLs
+
+        // It seams that media is only included in the short version of the tweet and not the long note version
         
-        const textEscaped = escapeHtml(textDecoded);
         const tweetId = t.id_str;
         const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
 
         // Check if this is a reply tweet
         let replyHtml = '';
-        if (t.in_reply_to_status_id_str && t.in_reply_to_screen_name) {
-          // Only show reply info if it's not part of a thread we're displaying
-          if (!tweetMap.has(t.in_reply_to_status_id_str)) {
-            const replyUrl = `https://x.com/${escapeHtml(t.in_reply_to_screen_name)}/status/${t.in_reply_to_status_id_str}`;
-            replyHtml = `
-    <div class="tweet-reply-info">
-      In reply to <a href="${escapeHtml(replyUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(t.in_reply_to_screen_name)}</a>
-    </div>`;
-          }
+
+        // Suppress the reply to line if this is in a thread (so it is obviously a reply to the tweet above it)
+        if (t.in_reply_to_status_id_str && !isThread) {
+  
+          const replyUrl = `https://x.com/${t.in_reply_to_screen_name}/status/${t.in_reply_to_status_id_str}`;
+          replyHtml = `
+            <div class="tweet-reply-info">
+              In reply to <a href="${replyUrl}" target="_blank" rel="noopener noreferrer">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>
+            </div>`;
         }
 
         // Build the media HTML, if any
@@ -209,14 +283,12 @@
 
         const threadClass = isThread ? ' thread-tweet' : '';
         return `
-  <div class="tweet-container${threadClass}">${replyHtml}
-    <div class="tweet-time">${escapeHtml(createdAt)}</div>
-    <div class="tweet-text">${textEscaped}</div>
-    <div class="tweet-media">${mediaHtml}</div>
-    <div class="tweet-link">
-      <a href="${escapeHtml(tweetUrl)}" target="_blank" rel="noopener noreferrer">View on X.com</a>
-    </div>
-  </div>`;
+          <div class="tweet-container${threadClass}" id="tweet-${tweetId}">
+            <div class="tweet-time"> <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">${createdAt}</a> </div>
+            <div class="tweet-reply-info">${replyHtml}</div>
+            <div class="tweet-text">${escapeSpecialCharsToHtml(text)}</div>
+            <div class="tweet-media">${mediaHtml}</div>
+          </div>`;
       }
 
       // Helper function to render a tweet and all its replies that we have
@@ -259,140 +331,129 @@
       }
 
       let html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <title>My Exported Tweets</title>
-  <style>
-    body {
-      margin: 2rem auto;
-      max-width: 600px;
-      font-family: sans-serif;
-      line-height: 1.4;
-      background: #f9f9f9;
-    }
-    .tweet-container {
-      background: #fff;
-      margin-bottom: 1rem;
-      padding: 1rem;
-      border: 1px solid #ddd;
-      border-radius: 5px;
-    }
-    .tweet-container.thread-tweet {
-      margin-bottom: 2px;
-      border-bottom-left-radius: 0;
-      border-bottom-right-radius: 0;
-    }
-    .tweet-container.thread-tweet + .tweet-container {
-      border-top-left-radius: 0;
-      border-top-right-radius: 0;
-      margin-top: -1px;
-    }
-    .tweet-media-grid {
-      display: grid;
-      grid-gap: 2px;
-      margin: 0.5rem 0;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .tweet-media-grid.grid-2 {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .tweet-media-grid.grid-3 {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .tweet-media-grid.grid-3 .media-item:first-child {
-      grid-column: span 2;
-    }
-    .tweet-media-grid.grid-4 {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .media-item {
-      position: relative;
-      overflow: hidden;
-    }
-    .media-item a {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    .media-item a:hover {
-      opacity: 0.9;
-    }
-    .media-item img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-    .tweet-reply-info {
-      font-size: 0.85rem;
-      color: #555;
-      margin-bottom: 0.5rem;
-    }
-    .tweet-reply-info a {
-      color: #1da1f2;
-      text-decoration: none;
-    }
-    .tweet-time {
-      color: #555;
-      font-size: 0.85rem;
-      margin-bottom: 0.5rem;
-    }
-    .tweet-text {
-      margin-bottom: 0.5rem;
-      white-space: pre-wrap;
-    }
-    .tweet-link a {
-      font-size: 0.85rem;
-      color: #1da1f2;
-      text-decoration: none;
-    }
-    .truncated-note {
-      font-size: 0.9em;
-      color: #536471;
-    }
-    .truncated-note a {
-      color: #1da1f2;
-      text-decoration: none;
-    }
-    .truncated-note a:hover {
-      text-decoration: underline;
-    }
-  </style>
-</head>
-<body>
-  <h1>My Exported Tweets</h1>
-`;
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8" />
+          <title>My Exported ${tweets.length} Tweets</title>
+          <style>
+            body {
+              margin: 2rem auto;
+              max-width: 600px;
+              font-family: sans-serif;
+              line-height: 1.4;
+              background: #f9f9f9;
+            }
+            .tweet-container {
+              background: #fff;
+              margin-top: 1rem;
+              margin-bottom: 1px;
+              padding: 1rem;
+              border: 1px solid #ddd;
+              border-radius: 8px;
+            }
+            .tweet-container.thread-tweet {                   /* Visually make thread connect to the tweet above them */
+              margin-top: 1px;
+              border-top: none;         
+              border-top-left-radius: 0;
+              border-top-right-radius: 0;
+            }
+            .tweet-media-grid {
+              display: grid;
+              grid-gap: 2px;
+              margin: 0.5rem 0;
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            .tweet-media-grid.grid-2 {
+              grid-template-columns: repeat(2, 1fr);
+            }
+            .tweet-media-grid.grid-3 {
+              grid-template-columns: repeat(2, 1fr);
+            }
+            .tweet-media-grid.grid-3 .media-item:first-child {
+              grid-column: span 2;
+            }
+            .tweet-media-grid.grid-4 {
+              grid-template-columns: repeat(2, 1fr);
+            }
+            .media-item {
+              position: relative;
+              overflow: hidden;
+            }
+            .media-item a {
+              display: block;
+              width: 100%;
+              height: 100%;
+            }
+            .media-item a:hover {
+              opacity: 0.9;
+            }
+            .media-item img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+              display: block;
+            }
+            .tweet-reply-info {
+              font-size: 0.85rem;
+              color: #555;
+              margin-bottom: 0.5rem;
+            }
+            .tweet-reply-info a {
+              color: #1da1f2;
+              text-decoration: none;
+            }
+            .tweet-time {
+              color: #555;
+              font-size: 0.85rem;
+              margin-bottom: 0.5rem;
+            }
+            .tweet-text {
+              margin-bottom: 0.5rem;
+              white-space: pre-wrap;
+            }
+            .tweet-link a {
+              font-size: 0.85rem;
+              color: #1da1f2;
+              text-decoration: none;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>My Exported Tweets</h1>
+      `;
 
-      // Second pass: Render tweets in order, handling threads
-      for (const rootTweetId of rootTweets) {
-        const threadHtml = renderTweetThread(rootTweetId);
-        if (threadHtml) {
-          html += threadHtml;
+      html +=`Total tweets: ${tweets.length}<br>`;
+
+      previousTweetId = null;
+
+      tweets.forEach(tweet => {
+
+        // TODO: Progess report
+
+        if (tweet.in_reply_to_status_id_str && tweet.in_reply_to_status_id_str === previousTweetId) {
+            // This is a reply to own own tweet that immedeately preceeded this one, 
+            // so show as a thread. This visually connects the tweets and also suppresses the "in reply to" line
+            isThread = true;
         } else {
-          // If no tweets were rendered, clear the last sequence
-          // This ensures tweets will be repeated if they're not directly consecutive
-          lastSequence = [];
+          isThread=false;        
         }
-      }
 
+        // TODO: Get rid of tweetmap we don't need it anymore
+
+        html += renderTweet(tweet,isThread);   
+        
+        // Remeber this tweet so we can check if the next one is a reply to it
+        previousTweetId = tweet.id_str;
+
+      });
+  
       html += `
-</body>
-</html>
-`;
+        </body>
+        </html>
+      `;
       return html;
-    }
-
-    /**
-     * Decodes common HTML entities (e.g. &amp;, &gt;, &lt;, etc.) so that
-     * Twitter-escaped text will be rendered properly.
-     */
-    function decodeHtmlEntities(str) {
-      const textarea = document.createElement("textarea");
-      textarea.innerHTML = str;
-      return textarea.value;
     }
 
     /**
@@ -437,15 +498,16 @@
           // Construct the correct path: tweets_media/tweet_id-filename
           const mediaPath = `data/tweets_media/${tweet.id_str}-${filename}`;
           
-          mediaHtml += `  <div class="media-item">
-    <a href="${mediaPath}" target="_blank" rel="noopener noreferrer">
-      <img src="${mediaPath}" 
-           alt="Tweet media" 
-           width="${width}" 
-           height="${height}"
-           loading="lazy" />
-    </a>
-  </div>\n`;
+          mediaHtml += `
+            <div class="media-item">
+            <a href="${mediaPath}" target="_blank" rel="noopener noreferrer">
+              <img src="${mediaPath}" 
+                  alt="Tweet media" 
+                  width="${width}" 
+                  height="${height}"
+                  loading="lazy" />
+            </a>
+          </div>\n`;
         }
         // Add support for other media types here if needed
       });
@@ -454,42 +516,80 @@
       return mediaHtml;
     }
 
+/*
+
+    // Iterate through tweets and print the appropriate text
+    tweets.forEach(tweet => {
+        const tweetText = cleanText(tweet.tweet.full_text); // Clean tweet text
+        let foundMatch = false;
+
+        for (const [key, value] of noteTweetMap) {
+            if (tweetText.startsWith(key)) { // Check if cleaned tweet text matches the beginning of a noteTweet
+                console.log(`Long form: ${value}`);
+                foundMatch = true;
+                break;
+            }
+        }
+
+        if (!foundMatch) {
+            console.log(`Original text: ${tweet.tweet.full_text.trim()}`);
+        }
+    });
+
+*/
     /**
      * Get the full tweet text, checking note-tweets.js if available
      */
     function getFullTweetText(tweet) {
       // First check if this is a note tweet
-      if (noteTweets && tweet.id_str) {
-        // Find matching note tweet
-        const noteTweet = noteTweets.find(nt => 
-          nt && nt.tweet && nt.tweet.id === tweet.id_str
+      if (notesArray && tweet.id_str) {
+        const noteTweet = notesArray.find(nt => 
+          nt.tweet && nt.tweet.id_str === tweet.id_str
         );
-        if (noteTweet && noteTweet.tweet && noteTweet.tweet.note_tweet) {
-          return noteTweet.tweet.note_tweet.text || tweet.full_text;
+        if (noteTweet && noteTweet.tweet.note_tweet) {
+          return noteTweet.tweet.note_tweet.text;
         }
       }
       
       // If not a note tweet or note tweets not loaded, return original text
+      // and add a visual indicator if the tweet appears to be truncated
       const text = tweet.full_text || "(No text)";
-      if (text.endsWith('…') && !noteTweets) {
-        const tweetUrl = `https://twitter.com/i/web/status/${tweet.id_str}`;
-        return `${text} <span class="truncated-note">(<a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">read full tweet on twitter.com</a>)</span>`;
+      if (text.endsWith('…') && !notesArray) {
+        return text + ' <a href="https://x.com/i/web/status/' + tweet.id_str + 
+               '" target="_blank" rel="noopener noreferrer">(click to read full tweet)</a>';
       }
       return text;
     }
 
     /**
-     * Utility: formats the date string from Twitter's "created_at" field.
+     * Utility: formats the date string into a tweet friendly format
      */
+
+    // TODO: Should we offer the user a way to use zulu times?  
+
     function formatDate(dateStr) {
-      const d = new Date(dateStr);
-      if (isNaN(d)) {
-        // fallback if invalid
-        return dateStr || "(Unknown date)";
-      }
       // Show local date/time
-      return d.toLocaleString();
+      return dateStr.toLocaleString();
     }
+
+    function openHtmlInNewTab(htmlContent) {
+      // Create a new Blob with the HTML content
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+
+      // Create a URL for the Blob
+      const url = URL.createObjectURL(blob);
+
+      // Open a new tab and navigate to the Blob URL
+      const newTab = window.open(url, '_blank');
+
+      if (!newTab) {
+          alert('Pop-up blocked! Please allow pop-ups for this website.');
+      } else {
+          // Optionally, revoke the URL once it's loaded to free resources
+          newTab.onload = () => URL.revokeObjectURL(url);
+      }
+  }
+
   </script>
 </body>
 </html>
