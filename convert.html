@@ -38,6 +38,16 @@
       background: #f0f0f0;
       border-radius: 4px;
     }
+    .progress-area {
+      margin: 1rem 0;
+      padding: 1rem;
+      border-radius: 4px;
+    }
+    .progress-area.error {
+      background: #ffebee;
+      color: #c62828;
+      border: 1px solid #ef9a9a;
+    }
   </style>
 </head>
 <body>
@@ -45,6 +55,9 @@
     <h1>Twitter Export to Static HTML</h1>
     <p>Select your <code>tweets.js</code> file and optionally your <code>note-tweets.js</code> file. If you don't include the note-tweets file, any tweets longer than the Twitter max limit will be truncated in the output, but there will be a link to view the full tweet on twitter.com.</p>
     <input type="file" id="file-input" accept=".js,.json" multiple />
+    <div id="progress-area" class="progress-area">
+      <p id="progress-message"></p>
+    </div>
 
     <div class="textarea-container">
       <p><strong>Generated HTML Output:</strong></p>
@@ -52,7 +65,26 @@
     </div>
   </div>
 
+  <!-- Hidden Static link that will be updated dynamically after the HTML has been generated -->
+  <a id="download-link" href="#" download="tweets.html" style="display: none;">Download tweets.html File</a>
+
   <script>
+
+    // This is the relative path to the media files. This is what it was in my export, but you may need to change it
+    // if it is different in your export or you want a different structure on your web server
+    const mediapath = "data/tweets_media/";
+
+
+    // Remeber the progress element so we can update it faster
+    const progressMessageText = document.getElementById("progress-message");
+
+    function updateProgressMessage(message) {
+      progressMessageText.textContent = message;
+    }
+
+    updateProgressMessage("Waiting for files to be selected and uploaded");
+
+    let tweetsContent = null;
 
     /**
      * Removes `window.YTD... = ` or similar prefix, if present, returning raw JSON text.
@@ -66,9 +98,6 @@
         .replace(/;\s*$/, ""); // remove trailing semicolon if any
     }
 
-    // Global variable to store note tweets in a map where the key is the cleaned noteTweet text
-    // Defaults to null becuase it is optional for the user to pass a notes-tweets.js file
-    let notesArray = null;
 
     document.getElementById("file-input").addEventListener("change", async function() {
       const files = Array.from(this.files);
@@ -83,28 +112,80 @@
 
         // Load main tweets into tweetsArray
         tweetsContent = await tweetsFile.text();
+
+        updateProgressMessage("Loading tweets.js file...");
         tweetsContentCleaned = removeJavaScriptPrefix(tweetsContent);
         tweetsContent = null;   // Free up memory
-        const tweetsArray = JSON.parse(tweetsContentCleaned).map( o=> o.tweet );    // Every tweet is in an object called `tweet`, so flatten that out for simplicity
+        let tweetsArray = JSON.parse(tweetsContentCleaned).map( o=> o.tweet );    // Every tweet is in an object called `tweet`, so flatten that out for simplicity
         tweetsContentCleaned = null;  // Free up memory
+
+        let tweetCount = 0;
+
+        // lets get the date into a normalized format for all the tweets
+        // We also need to add a sequence number so we can keep tweet strorms in thier orginal ordering (they have idential timestamps and the ID numbers are not monotonically increasing)
+        tweetsArray.forEach (tweet => {
+          tweet.timestamp = new Date(tweet.created_at);        
+          tweet.sequence = tweetCount;
+          tweetCount = tweetCount + 1;
+        });        
 
         // Look for note-tweets.js (optional)
         const noteTweetsFile = files.find(f => f.name.toLowerCase() === 'note-tweets.js');
-        
+
+        let notesArray = [];    // By default we use an empty array rather than undefined so we can operate on it without checking
+        let noteCount = 0;
+
         // Load note tweets if available
         if (noteTweetsFile) {
+
+          updateProgressMessage("Loading note-tweets.js file...");
           const noteContent = await noteTweetsFile.text();
           const noteCleanContent = removeJavaScriptPrefix(noteContent);   // Remove the varabile name at the top of the file so just pure JSON
-          notesArray = JSON.parse( noteContent).map( o=> o.noteTweet );    // Every noteTweet is in an object called `noteTweet`, so flatten that out for simplicity            
+          notesArray = JSON.parse( noteCleanContent).map( o=> o.noteTweet );    // Every noteTweet is in an object called `noteTweet`, so flatten that out for simplicity            
+
+          // We don't bother sorting the notes since they will end up in a set anyway. This does mean we could scamble the order of notes
+          // in the very edge case that two tweets in a tweet storm have the same short version but different long versions. :/
         }
 
+
+        // We sort the tweets by date, oldest first.
+        // This makes displaying tweetstorms more natural, and also maybe better for SEO?
+        // TODO: Should we also delete the `created_at` property as we go to save space?
+
+        // It seems that tweetstorms all get the same timestamp, so we use the sequence number to break ties 
+
+        updateProgressMessage("Sorting tweets...");
+
+        tweetsArray = tweetsArray.sort((a, b) =>  {
+
+          // If two tweets have the same timestamp, the one that came earlier in the tweet.js file should come first
+          if (a.timestamp.getTime() === b.timestamp.getTime()) {
+            return b.sequence - a.sequence;  // Highest sequnce first since threaded tweets come in inverse order int tweets.js
+          }
+
+          // Sort by timestamp, oldest first
+          return a.timestamp.getTime() - b.timestamp.getTime();     
+
+        });
+
+
+        updateProgressMessage("Generating static HTML...");
 
         // Generate the static HTML
         const staticHTML = generateStaticHTML(tweetsArray,notesArray);
 
-        // Display it in the textarea
-        document.getElementById("output-textarea").value = staticHTML;
+        updateProgressMessage("Creating download blob...");
 
+        // Update the download link
+        const downloadLink = document.getElementById("download-link");
+        // Create a Blob with the data and generate a Blob URL
+        const blob = new Blob([staticHTML], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        downloadLink.href = url;    // Set the href attribute of the link to the Blob URL
+        downloadLink.style.display = 'inline-block'; // Show the link (was inisible until now)
+
+        updateProgressMessage("Finished. Click download link above to save.");
+     
         // Create an "Open in New Tab" button if it doesn't exist
         let openButton = document.getElementById("open-tab-button");
         if (!openButton) {
@@ -116,11 +197,10 @@
         }
 
       } catch (err) {
-        alert("Error: " + err.message);
+        alert("Error: " + err.message + "\n" + err.stack);
         console.error(err);
       }
     });
-
 
     /**
      * Escapes HTML special characters in a string
@@ -129,95 +209,51 @@
      * TODO: Are there others?  
      */
     function escapeSpecialCharsToHtml(str) {
-      return str.replace("\n", "<br>").replace("\"", "&quot;");
+      return str
+        .replace(/\r?\n/g, '<br>')
+        .replace(/"/g, '&quot;');
     }
+
+    // Expand the shortened URLs in a tweet into their full URLs. Takes the names of the properties becuase
+    // tweets and note tweet use differen property names.
+    // Assumes urls array exists, which it should in the twitter export, it is empty for tweets with no URLs
+    // = expandUrls(escapedTweetText,t.urls,"url","display_url","expanded_url");
+
+    function expandUrls(text,urls,shortUrlProperty,displayUrlProperty,expandedUrlProperty) {
+
+      urls.forEach(url => {
+        console.log("replace "+url);
+        text = text.replace(url[shortUrlProperty],`<a href="${url[expandedUrlProperty]}" target="_blank">${url[displayUrlProperty]}</a>`); 
+      });
+
+      return text;  
+    }
+
 
     /**
      * Generates a complete static HTML document from an array of tweet objects.
      * This HTML contains no JavaScript and references images in the `tweets_media` folder.
-     * notes will be null if no notes-tweets.js file was included
+     * If no notes, then pass an empty array.
+     * Tweets will be exported in the order they are in the array. Notes should be sorted in same order so that they line up with tweets.
+     * It is very hard to match tweets with notes, so it is still possible to get them out of order.
      */
+
+
     function generateStaticHTML(tweets,notes) {
 
-      count = 0;
+      // We pre-exapand all the URLs notes so we can search on them (the tiny URLs are different between the short tweet and the long note tweet)
+      // We have to escape the special chars for HTML first before we can expand the URLs becuase they will have HTML in them. 
+      // Text text is called `text` in notes and `full_text` in tweets
+      let notesWorkingRecordsSet = new Set();
 
-      // First lets get the date into a normalized format for all the tweets
-      // We also need to add a sequence number so we can keep tweet strorms in thier orginal ordering (they have idential timestamps and the ID numbers are not monotonically increasing)
-      tweets.forEach (tweet => {
-        tweet.timestamp = new Date(tweet.created_at);        
-        tweet.sequence = count;
-        count = count + 1;
-      });
-
-      // Now we can sort the tweets by date, oldest first.
-      // This makes displaying tweetstorms more natural, and also maybe better for SEO?
-      // TODO: Should we also delete the `created_at` property as we go to save space?
-
-      // It seems that tweetstorms all get the same timestamp, so we add `id_str` to break ties 
-      // Assumes that tweet IDs are assigned monotonically. IS that true?
-
-      // Highest time number is 2^32 = 10 digits
-      // Assume no one has more than 10 million tweets
-
-      tweets = tweets.sort((a, b) =>  {
-
-        // If two tweets have the same timestamp, the one that came earlier in the tweet.js file should come first
-        if (a.timestamp.getTime() === b.timestamp.getTime()) {
-          return b.sequence - a.sequence;  // Highest sequnce first since threaded tweets come in inverse order int tweets.js
-        }
-
-        // Sort by timestamp, oldest first
-        return a.timestamp.getTime() - b.timestamp.getTime();     
-
-      });
-    
-
-      // If we were passed notes, then build a map of the text part so we can later look to find a matching tweet
-
-      // We need a map becuase the long note might have URLs in it and if those URLs are past the end of the shortened
-      // tweet then we need to get them from `ulrs` in the noteTweet
-          
-      let notesMap = null;        // Will be null if no notes-tweets.js file was included
-      if (notes) {
-        notesArray = notes;
-        notesMap = new Map();
-        notesArray.forEach(note => {
-            notesMap.set( note.noteTweet.core.text , note);   // Store the original long text as key and a ref to the full note as element
+      updateProgressMessage("Expanding URLs in notes.");
+      
+      notes.forEach( note => {
+        notesWorkingRecordsSet.add( {
+          "text": expandUrls( escapeSpecialCharsToHtml(note.text),note.core.urls,"shortUrl","displayUrl","expandedUrl") ,
+          "timestamp": new Date(note.createdAt)     // Precompute this so we can search on it faster
         });
-      }
-
-
-      // Build a map of tweet IDs to tweets so we can later find replies
-      const tweetMap = new Map();
-
-      // TODO: do we need this?
-      tweets.forEach(tweet => {
-        tweetMap.set(tweet.id_str, tweet);
       });
-      
-      
-/*
-
-      for (const item of tweets) {
-        const t = item.tweet || {};
-
-        if (t.id_str) {
-          tweetMap.set(t.id_str, t);
-          
-          // If this tweet is not a reply or is a reply to a tweet we don't have,
-          // consider it a root tweet
-          if (!t.in_reply_to_status_id_str || !tweetMap.has(t.in_reply_to_status_id_str)) {
-            rootTweets.add(t.id_str);
-          } else {
-            // If this is a reply to a tweet we have, remove the replied-to tweet
-            // from root tweets as it's part of a thread
-            rootTweets.delete(t.in_reply_to_status_id_str);
-          }
-        } else {
-          console.log(`Error: Tweet ID not found in tweet object: ${JSON.stringify(item)}`);
-        }
-      }
-*/
 
       // Helper function to render a single tweet
       function renderTweet(t, isThread = false) {
@@ -225,7 +261,8 @@
         const createdAt = formatDate(t.timestamp);
 
         // Get the media URLs for this tweet
-        // Seams like entities and extended_entities are rendundant? We use a set so it doesn't matter. 
+        // Seams like entities and extended_entities are rendundant? Doesnt matter we are using a set.
+
         const mediaUrls = new Set();
         if (t.entities && Array.isArray(t.entities.media)) {
           t.entities.media.forEach(m => {
@@ -234,12 +271,22 @@
             }
           });
         }
-        if (t.extended_entities && Array.isArray(t.extended_entities.media)) {
-          t.extended_entities.media.forEach(m => {
-            if (m.url) {
-              mediaUrls.add(m.url);
-            }
-          });
+        if (t.extended_entities) {
+          if (Array.isArray(t.extended_entities.media)) {
+            t.extended_entities.media.forEach(m => {
+              if (m.url) {
+                mediaUrls.add(m.url);
+              }
+              // For videos, check the variants in video_info
+              if (m.video_info?.variants) {
+                m.video_info.variants.forEach(variant => {
+                  if (variant.url) {
+                    mediaUrls.add(variant.url);
+                  }
+                });
+              }
+            });
+          }
         }
 
         // Remove media URLs from text
@@ -257,6 +304,7 @@
         
         // Next remove any leading mentions. We will add them as a different element from the usermentions array in entities. 
         // Not only do they look ugly at the begining there, they will also break our ability to find this tweet in notetweets
+        // No need to save them becuase they are redundantly also stored in entities.user_mentions
 
         while (text.startsWith('@')) {
           // Find the end of the username (space or end of string)
@@ -269,31 +317,79 @@
           text = text.slice(spaceIndex + 1).trimStart();          
         }
 
-        console.log( "t:" + JSON.stringify(t, null, 4) );
-        console.log( "entities:" + JSON.stringify(t.entities, null, 4) );
-        if (t.entities && t.entities.user_mentions) console.log( "entities+mentions:" + JSON.stringify(t.entities.user_mentions, null, 4) );
 
         // now create the html for the mentions section
         let mentionsHtml = '';
         if (t.entities && t.entities.user_mentions && t.entities.user_mentions.length > 0) {
-          console.log("making table");  
           mentionsHtml += `<table>\r`;              
           t.entities.user_mentions.forEach(m => {
             mentionsHtml += ` <tr><td><a href="https://x.com/${m.screen_name}" target="_blank" rel="noopener noreferrer">@${m.screen_name}</a></td><td>${m.name}</td></tr>\r`;              
           });
           mentionsHtml += `</table>\r`;              
         }
-              
+
+
+        // OK when we get to here, text has the short tweet with leading mentions removed and the trailing media URLs removed.
+        // The embded URLs have not yet been expended and special chars have not been escaped.
+        // This puts us in a position to check if this is a note tweet and if so replace the text with the note body.
+
+        // Checking to see if there is a note that matches this tweet is hard. There is no hard link between them, so we have to do a 
+        // fuzzy match. 
+        // First we check to get all of the notes that have the same timestamp as the tweet, but nust having a matching timestamp
+        // is not enough becuase multipule tweets can have the same timestamp, so we also need to check to see if the text of the note
+        // matches the cleaned text of the tweet. Even this is not enough becuase there could be multiple tweets with the same timestamp
+        // and matching short text, but the long text of the note could be different. To deal with this very edge case, we keep a set of which
+        // notes have been matched and then only use notes that have not been matched.
+
+        // All this may seam like overkill, but it ensures that the worst mismatch that can happen is that we match the wrong note to the wrong tweet
+        // within the same tweetstorm, so net effect is that the long tweets ar ein the wrong order - and this is a very edge case of a tweetstorm
+        // where there is a maximum length short tweet and a long tweet that begins the exact same way as he short tweet but is longer.
+
+        // It looks like embeded URLs are different between the two versions of the tweet, so we need to expand them before comparing them. Urgh. 
+        // tweets: "full_text" : "Sadly it seams that https://t.co/QKpprngYYE leaked my email address (and probably yours) to spammers.\n#surprisingspam\n\nHow I know:\nhttps://t.co/6m5GQ8IPHS\n\n(Interestingly, GMAIL silently ghosted this spam.  It is good that they correctly classified it as spam, but it is scary… https://t.co/gQcv8kzM4D",
+        // notes: "text"       : "Sadly it seams that https://t.co/XVzYx757Tu leaked my email address (and probably yours) to spammers.\n#surprisingspam\n\nHow I know:\nhttps://t.co/bzKbdOkkrX\n\n(Interestingly, GMAIL silently ghosted this spam.  It is good that they correctly classified it as spam, but it is scary that they think it is ok to accept an email and then completely erase any record that it ever existed. Beware.)",
+
+        // But since we are going to expand the URLs, we will also need to escape out the HTML special chars before we do the expantion or else we will loose the links.
+
+        escapedTweetText = escapeSpecialCharsToHtml(text);
+
+        // We can't even use the same code to the the expansion becuase the properties on tweets and notes have different names. :/
+
+        expandedEscaptedTweetText = expandUrls(escapedTweetText,t.entities.urls,"url","display_url","expanded_url");
+
+        function removeTrailingChar(str, charToRemove) {
+            if (str.endsWith(charToRemove)) {
+                return str.slice(0, -1);
+            }
+            return str;
+        }
+
+        const expandedEscaptedTweetTextWithoutTrailingElipsis = removeTrailingChar(expandedEscaptedTweetText, "…");
+
+        // OK now we can go looking to see if there is an unused note that matches this tweet's (1) timesdtamp and (2) leading text
+
+        let firstMatchingNoteRecord = undefined;
+        for (const note of notesWorkingRecordsSet) {
+            if (note.timestamp.getTime() === t.timestamp.getTime() && note.text.startsWith(expandedEscaptedTweetTextWithoutTrailingElipsis)) {
+                firstMatchingNoteRecord =  note;
+                break;  // Exit as soon as we find a match
+            }
+        }
+
+        if (firstMatchingNoteRecord !== undefined) {
+          // We found a note that matches this tweet
+
+          // Replace the text of the tweet with the text of the note
+          text = firstMatchingNoteRecord.text;  
+
+          // Remove it from the set so we don't use it again for subsequent tweets
+          notesWorkingRecordsSet.delete(firstMatchingNoteRecord);
+
+        }
+
         // text now has external embeded URLs expaned and media URLs removed and any trailing spaces removed.
-        // This should be 
 
-
-        // TODO: Check if this is a note tweet and if so replace the text
-
-        // TODO: After we check if it is a note, then exapnd any embeded URLs
-
-        // It seams that media is only included in the short version of the tweet and not the long note version
-        
+        // Next we build the reply HTML
         const tweetId = t.id_str;
         const tweetUrl = `https://x.com/i/web/status/${tweetId}`;
 
@@ -306,14 +402,21 @@
           replyHtml = `In reply to <a href="${replyUrl}" target="_blank" rel="noopener noreferrer">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>`;
         }
 
-        // Build the media HTML, if any
-        const mediaHtml = getMediaHtml(t);
 
-        // Note that below we do not use a div for the mentions table since it is usually not present so no need to waste that space unless needed
+        // Next build the media HTML, if any
+
+        const mediaFilenames = getMediaFilenames(t);
+
+        let mediaHtml = "";
+
+        // Only bother to include the mdia div is there is any media. 
+        if (mediaFilenames.length > 0) {
+          mediaHtml += getMediaHtml(t,mediaFilenames);
+        }
+
+        // ===== Finally we will build up the final html for the tweet so we can return it. 
 
         const threadClass = isThread ? ' thread-tweet' : '';
-
-        // Finally we will build up the final html for the tweet so we can return it. 
 
         let tweetHTML = "";
 
@@ -328,7 +431,8 @@
           tweetHTML += `   <div class="tweet-mentions">${mentionsHtml}</div>\r`;  
         }
 
-        tweetHTML += `   <div class="tweet-text">${escapeSpecialCharsToHtml(text)}</div>\r`;
+        // Here is the beef
+        tweetHTML += `   <div class="tweet-text">${expandedEscaptedTweetText}</div>\r`;
 
         if (mediaHtml) {
           tweetHTML += `   <div class="tweet-media">${mediaHtml}</div>\r`;
@@ -338,44 +442,7 @@
         return tweetHTML;
       }
 
-      // Helper function to render a tweet and all its replies that we have
-      function renderTweetThread(tweetId) {
-        const thread = [];
-        let currentTweetId = tweetId;
-        
-        // First, go up the reply chain to find the start of the thread
-        while (currentTweetId) {
-          const tweet = tweetMap.get(currentTweetId);
-          if (!tweet) break;
-          thread.unshift(tweet); // Add to start of array
-          currentTweetId = tweet.in_reply_to_status_id_str;
-          if (!tweetMap.has(currentTweetId)) break;
-        }
-
-        // Compare with last sequence and remove any duplicates from the start
-        let startIndex = 0;
-        if (lastSequence.length > 0) {
-          // Find how many tweets from the start match the last sequence
-          while (startIndex < thread.length && 
-                 startIndex < lastSequence.length && 
-                 thread[startIndex].id_str === lastSequence[startIndex].id_str) {
-            startIndex++;
-          }
-        }
-
-        // If all tweets were duplicates, return empty string
-        if (startIndex === thread.length) {
-          return '';
-        }
-
-        // Update the last sequence to this thread
-        lastSequence = thread;
-        
-        // Render only the non-duplicate tweets
-        return thread.slice(startIndex)
-                    .map((t, index, arr) => renderTweet(t, index < arr.length - 1))
-                    .join('\n');
-      }
+      // Build the final HTML    
 
       let html = `
         <!DOCTYPE html>
@@ -438,7 +505,7 @@
             }
             .media-item img {
               width: 100%;
-              height: 100%;
+              height: auto;
               object-fit: cover;
               display: block;
             }
@@ -452,7 +519,7 @@
               text-decoration: none;
             }
             .tweet-time {
-              color: #555;
+              color: rgb(83, 100, 113);
               font-size: 0.85rem;
               margin-bottom: 0.5rem;
             }
@@ -494,9 +561,14 @@
 
       previousTweetId = null;
 
+      let progressCount = 0;
+
       tweets.forEach(tweet => {
 
-        // TODO: Progess report
+        progressCount++;
+
+        updateProgressMessage(`Rendering tweet ${progressCount} of ${tweets.length}`);
+
 
         if (tweet.in_reply_to_status_id_str && tweet.in_reply_to_status_id_str === previousTweetId) {
             // This is a reply to own own tweet that immedeately preceeded this one, 
@@ -505,8 +577,6 @@
         } else {
           isThread=false;        
         }
-
-        // TODO: Get rid of tweetmap we don't need it anymore
 
         html += renderTweet(tweet,isThread);   
         
@@ -522,109 +592,108 @@
       return html;
     }
 
+
+    // For a media in a tweet's extended_entities, this will find the URL that actually coesponds to the media filename that is included in the export (at least for all cases I can check)
+    
+    function getMediaURL(m) {
+
+      // Check if it's a video 
+      if (m.type == 'video' || m.type == 'animated_gif') {
+
+        // animated GIFs seem to be exported as video
+
+        // In the case of video, the file included in the export seems to be the highest quality variant
+
+        console.log("m", JSON.stringify(m));
+
+        const maxVariant = m.video_info.variants.filter(variant => variant.content_type === 'video/mp4').reduce((highest, current) => {
+            if (!current.bitrate) showError("Missing bitrate in video variant");
+            console.log("current", JSON.stringify(current), "highest", JSON.stringify(highest));
+            return current.bitrate > highest.bitrate ? current : highest;
+        });
+
+        console.log("maxVariant", JSON.stringify(maxVariant));
+
+        // Extract filename from URL
+        return maxVariant.url;
+
+      } else if (m.type == 'photo') {
+
+        // Extract filename from URL
+        return m.media_url_https;
+
+      } else {
+
+        showError(`Unknown media type ${m.type}`);
+
+      }
+
+    }    
+
+
     /**
-     * Attempts to get media from `extended_entities.media` or `entities.media`.
-     * Returns HTML <img> tags referencing `tweets_media/<filename>`.
+     * Attempts to get a list of media filenames from `extended_entities.media` 
+     * Handles both images and videos
+     * returns a list of filenames or empty list if no media found
      */
-    function getMediaHtml(tweet) {
-      let media = [];
+
+    function getMediaFilenames(tweet) {
       
       // Check extended_entities first as it contains the full media info
-      if (tweet.extended_entities && Array.isArray(tweet.extended_entities.media)) {
-        media = tweet.extended_entities.media;
-      }
-      // Fall back to entities.media if no extended_entities
-      else if (tweet.entities && Array.isArray(tweet.entities.media)) {
-        media = tweet.entities.media;
-      }
+      if (!tweet.extended_entities || !tweet.extended_entities.media) {  
+        return [];
+      } 
 
-      if (media.length === 0) {
-        return "";
-      }
 
-      let mediaHtml = '<div class="tweet-media-grid">\n';
-      
-      // Add a CSS class based on number of media items
-      const gridClass = media.length > 1 ? ` grid-${Math.min(media.length, 4)}` : '';
-      mediaHtml = `<div class="tweet-media-grid${gridClass}">\n`;
+      let filenames = [];
 
+      const media = tweet.extended_entities.media;
+
+
+    
       media.forEach(m => {
-        if (!m.media_url_https && !m.media_url) return;
-        
-        // Prefer HTTPS URL if available
-        const mediaUrl = m.media_url_https || m.media_url;
-        const filename = mediaUrl.split("/").pop();
-        
-        // Get the type of media and original dimensions
-        const mediaType = m.type || 'photo';
-        const width = m.sizes?.large?.w || m.sizes?.medium?.w || 600;
-        const height = m.sizes?.large?.h || m.sizes?.medium?.h || 400;
-        
-        if (mediaType === 'photo') {
-          // Construct the correct path: tweets_media/tweet_id-filename
-          const mediaPath = `data/tweets_media/${tweet.id_str}-${filename}`;
-          
+
+        const url = getMediaURL(m);               // Find the URL that matches to the fiel that was included in the export - different for photos and videos
+        const basename = url.split("/").pop();  // Get just part of the url after the last slash
+        const mediaFilename = basename.split('?')[0]; // Remove any query parameters    
+
+        filenames.push(`${tweet.id_str}-${mediaFilename}`);
+      })
+
+      /*
+      if (tweet.id_str === "864846955343642624") {
+
+        console.log( JSON.stringify(tweet) );
+        showError("Thats the one");
+
+      }
+      */
+    
+    return filenames;
+  }
+
+
+function getMediaHtml(tweet,mediaFileNamefileNames) {
+      
+      // Add a CSS grid class based on number of media items
+      const gridClass = mediaFileNamefileNames.length > 1 ? ` grid-${Math.min(mediaFileNamefileNames.length, 4)}` : '';
+      let mediaHtml = `<div class="tweet-media-grid${gridClass}">\n`;
+
+      mediaFileNamefileNames.forEach(m => {
+                  
           mediaHtml += `
             <div class="media-item">
-            <a href="${mediaPath}" target="_blank" rel="noopener noreferrer">
-              <img src="${mediaPath}" 
+            <a href="${mediapath}${m}" target="_blank" rel="noopener noreferrer">
+              <img src="${mediapath}${m}" 
                   alt="Tweet media" 
-                  width="${width}" 
-                  height="${height}"
+                  style="width: 100%; height: auto;"
                   loading="lazy" />
             </a>
           </div>\n`;
-        }
-        // Add support for other media types here if needed
-      });
+        });
       
       mediaHtml += '</div>';
       return mediaHtml;
-    }
-
-/*
-
-    // Iterate through tweets and print the appropriate text
-    tweets.forEach(tweet => {
-        const tweetText = cleanText(tweet.tweet.full_text); // Clean tweet text
-        let foundMatch = false;
-
-        for (const [key, value] of noteTweetMap) {
-            if (tweetText.startsWith(key)) { // Check if cleaned tweet text matches the beginning of a noteTweet
-                console.log(`Long form: ${value}`);
-                foundMatch = true;
-                break;
-            }
-        }
-
-        if (!foundMatch) {
-            console.log(`Original text: ${tweet.tweet.full_text.trim()}`);
-        }
-    });
-
-*/
-    /**
-     * Get the full tweet text, checking note-tweets.js if available
-     */
-    function getFullTweetText(tweet) {
-      // First check if this is a note tweet
-      if (notesArray && tweet.id_str) {
-        const noteTweet = notesArray.find(nt => 
-          nt.tweet && nt.tweet.id_str === tweet.id_str
-        );
-        if (noteTweet && noteTweet.tweet.note_tweet) {
-          return noteTweet.tweet.note_tweet.text;
-        }
-      }
-      
-      // If not a note tweet or note tweets not loaded, return original text
-      // and add a visual indicator if the tweet appears to be truncated
-      const text = tweet.full_text || "(No text)";
-      if (text.endsWith('…') && !notesArray) {
-        return text + ' <a href="https://x.com/i/web/status/' + tweet.id_str + 
-               '" target="_blank" rel="noopener noreferrer">(click to read full tweet)</a>';
-      }
-      return text;
     }
 
     /**
@@ -654,6 +723,14 @@
           // Optionally, revoke the URL once it's loaded to free resources
           newTab.onload = () => URL.revokeObjectURL(url);
       }
+  }
+
+  function showError(message) {
+    const progressArea = document.getElementById('progress-area');
+    const progressMessage = document.getElementById('progress-message');
+    progressArea.classList.add('error');
+    progressMessage.textContent = message;
+    throw new Error(message); // This will terminate execution
   }
 
   </script>
