@@ -22,22 +22,7 @@
     #file-input {
       margin-bottom: 1rem;
     }
-    .textarea-container {
-      margin-top: 1rem;
-    }
-    textarea {
-      width: 100%;
-      height: 300px;
-    }
-    .note-tweet-section {
-      margin: 1rem 0;
-    }
-    #note-tweet-input {
-      margin: 1rem 0;
-      padding: 1rem;
-      background: #f0f0f0;
-      border-radius: 4px;
-    }
+
     .progress-area {
       margin: 1rem 0;
       padding: 1rem;
@@ -48,25 +33,35 @@
       color: #c62828;
       border: 1px solid #ef9a9a;
     }
+    code {
+      white-space: nowrap;
+      background-color: #e3f2fd;  /* Light blue background */
+      color: #1565c0;            /* Dark blue text */
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', monospace;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Twitter Export to Static HTML</h1>
-    <p>Select your <code>tweets.js</code> file and optionally your <code>note-tweets.js</code> file. If you don't include the note-tweets file, any tweets longer than the Twitter max limit will be truncated in the output, but there will be a link to view the full tweet on twitter.com.</p>
+    <h2>Select your <code>tweets.js</code> file and optionally your <code>note-tweet.js</code> file below.</h2>
+    <p>You can select multipule files by holding the control key while clicking.</p>
+    <p>If you don't include the note-tweets file, any tweets longer than the Twitter max limit will be truncated in the output, but there will be a link to view the full tweet on twitter.com.</p>
     <input type="file" id="file-input" accept=".js,.json" multiple />
     <div id="progress-area" class="progress-area">
       <p id="progress-message"></p>
-    </div>
+    </div>  
 
-    <div class="textarea-container">
-      <p><strong>Generated HTML Output:</strong></p>
-      <textarea id="output-textarea" placeholder="Your static HTML will appear here..." readonly></textarea>
-    </div>
+    <!-- Hidden Static link that will be updated dynamically after the HTML has been generated -->
+    <p><a id="download-link" href="#" download="tweets.html" style="display: none;">Download tweets.html File</a></p>
+    <p><a id="open-link" href="#" target="_blank" style="display: none;">Open in New Tab (note that media will probably not be in the right directory)</a></p>
+
   </div>
 
-  <!-- Hidden Static link that will be updated dynamically after the HTML has been generated -->
-  <a id="download-link" href="#" download="tweets.html" style="display: none;">Download tweets.html File</a>
+
+
 
   <script>
 
@@ -130,7 +125,7 @@
         });        
 
         // Look for note-tweets.js (optional)
-        const noteTweetsFile = files.find(f => f.name.toLowerCase() === 'note-tweets.js');
+        const noteTweetsFile = files.find(f => f.name.toLowerCase() === 'note-tweet.js');
 
         let notesArray = [];    // By default we use an empty array rather than undefined so we can operate on it without checking
         let noteCount = 0;
@@ -176,26 +171,24 @@
 
         updateProgressMessage("Creating download blob...");
 
-        // Update the download link
-        const downloadLink = document.getElementById("download-link");
         // Create a Blob with the data and generate a Blob URL
         const blob = new Blob([staticHTML], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
+
+
+        // Update the download link
+        const downloadLink = document.getElementById("download-link");
         downloadLink.href = url;    // Set the href attribute of the link to the Blob URL
         downloadLink.style.display = 'inline-block'; // Show the link (was inisible until now)
 
-        updateProgressMessage("Finished. Click download link above to save.");
-     
-        // Create an "Open in New Tab" button if it doesn't exist
-        let openButton = document.getElementById("open-tab-button");
-        if (!openButton) {
-          openButton = document.createElement("button");
-          openButton.id = "open-tab-button";
-          openButton.textContent = "Open in New Tab";
-          openButton.onclick = () => openHtmlInNewTab(staticHTML);
-          document.getElementById("output-textarea").insertAdjacentElement('afterend', openButton);
-        }
 
+        // Update the open link
+        const openLink = document.getElementById("open-link");
+        openLink.href = url;    // Set the href attribute of the link to the Blob URL
+        openLink.style.display = 'inline-block'; // Show the link (was inisible until now)
+
+        updateProgressMessage("Finished. Click download link above to save newly generated HTML file.");
+     
       } catch (err) {
         alert("Error: " + err.message + "\n" + err.stack);
         console.error(err);
@@ -222,7 +215,6 @@
     function expandUrls(text,urls,shortUrlProperty,displayUrlProperty,expandedUrlProperty) {
 
       urls.forEach(url => {
-        console.log("replace "+url);
         text = text.replace(url[shortUrlProperty],`<a href="${url[expandedUrlProperty]}" target="_blank">${url[displayUrlProperty]}</a>`); 
       });
 
@@ -249,9 +241,18 @@
       updateProgressMessage("Expanding URLs in notes.");
       
       notes.forEach( note => {
-        notesWorkingRecordsSet.add( {
-          "text": expandUrls( escapeSpecialCharsToHtml(note.text),note.core.urls,"shortUrl","displayUrl","expandedUrl") ,
-          "timestamp": new Date(note.createdAt)     // Precompute this so we can search on it faster
+
+        console.log("Note time: " + new Date(note.createdAt));
+
+        // Process note text to get it in same form as tweet text will be for consistent matching        
+        let noteText = escapeSpecialCharsToHtml(note.core.text);
+        noteText = expandUrls(noteText, note.core.urls, "shortUrl", "displayUrl", "expandedUrl");
+
+        console.log("Note out : " + noteText); 
+        
+        notesWorkingRecordsSet.add({
+          "text": noteText,
+          "timestamp": new Date(note.createdAt)
         });
       });
 
@@ -366,25 +367,39 @@
 
         const expandedEscaptedTweetTextWithoutTrailingElipsis = removeTrailingChar(expandedEscaptedTweetText, "…");
 
-        // OK now we can go looking to see if there is an unused note that matches this tweet's (1) timesdtamp and (2) leading text
 
+        // OK now we can go looking to see if there is an unused note that matches this tweet's (1) timesdtamp and (2) leading text
         let firstMatchingNoteRecord = undefined;
         for (const note of notesWorkingRecordsSet) {
-            if (note.timestamp.getTime() === t.timestamp.getTime() && note.text.startsWith(expandedEscaptedTweetTextWithoutTrailingElipsis)) {
-                firstMatchingNoteRecord =  note;
-                break;  // Exit as soon as we find a match
+            console.log("Checking note:", note.text);
+            console.log("Note timestamp:", note.timestamp.getTime());
+
+            //console.log("Tweet timestamp:", t.timestamp.getTime());
+
+            if (note.timestamp.getTime() === t.timestamp.getTime()) {
+                console.log("Timestamp matches!");
+
+                //Debug logging
+                console.log("Tweet text to match:", expandedEscaptedTweetTextWithoutTrailingElipsis);
+                console.log("Note text to match :", note.text);
+
+                if (note.text.startsWith(expandedEscaptedTweetTextWithoutTrailingElipsis)) {
+                    console.log("Text matches too!");
+                    firstMatchingNoteRecord = note;
+                    break;  // Exit as soon as we find a match
+                } else {
+                    console.log("Text does not match");
+                }
             }
         }
 
         if (firstMatchingNoteRecord !== undefined) {
           // We found a note that matches this tweet
-
-          // Replace the text of the tweet with the text of the note
-          text = firstMatchingNoteRecord.text;  
+          // Use the original unprocessed note text for display
+          expandedEscaptedTweetText = firstMatchingNoteRecord.text;  // Use the note text for output
 
           // Remove it from the set so we don't use it again for subsequent tweets
           notesWorkingRecordsSet.delete(firstMatchingNoteRecord);
-
         }
 
         // text now has external embeded URLs expaned and media URLs removed and any trailing spaces removed.
@@ -551,6 +566,14 @@
             .tweet-mentions a:hover {
               text-decoration: underline;
             }
+            code {
+              white-space: nowrap;
+              background-color: #e3f2fd;  /* Light blue background */
+              color: #1565c0;            /* Dark blue text */
+              padding: 2px 6px;
+              border-radius: 4px;
+              font-family: 'Consolas', monospace;
+            }
           </style>
         </head>
         <body>
@@ -602,17 +625,12 @@
 
         // animated GIFs seem to be exported as video
 
-        // In the case of video, the file included in the export seems to be the highest quality variant
-
-        console.log("m", JSON.stringify(m));
+        // In the case of video, the file included in the export seems to be the highest quality variant with type video/mp4
 
         const maxVariant = m.video_info.variants.filter(variant => variant.content_type === 'video/mp4').reduce((highest, current) => {
             if (!current.bitrate) showError("Missing bitrate in video variant");
-            console.log("current", JSON.stringify(current), "highest", JSON.stringify(highest));
             return current.bitrate > highest.bitrate ? current : highest;
         });
-
-        console.log("maxVariant", JSON.stringify(maxVariant));
 
         // Extract filename from URL
         return maxVariant.url;
