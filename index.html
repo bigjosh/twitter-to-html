@@ -121,7 +121,7 @@
       progressMessageText.textContent = message;
     }
 
-    updateProgressMessage("Waiting for files to be selected and uploaded");
+    updateProgressMessage("Waiting for files to be selected and processed");
 
 
     // Remeber the progress element so we can update it faster
@@ -211,7 +211,7 @@
         openLink.style.display = 'inline-block'; // Show the link (was inisible until now)
         */
 
-        updateProgressMessage("Finished. Click download link above to save newly generated HTML file.");
+        updateProgressMessage("Finished. Click the link below to save the newly generated HTML file.");
      
       } catch (err) {
         alert("Error: " + err.message + "\n" + err.stack);
@@ -810,6 +810,8 @@
         updateWarningMessage(`There are ${notesWorkingRecordsSet.size} notes that were not matched to tweets.<br>Please see https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/#mismatched-notes for more info.`);
       }
 
+
+      html += `<p style="color: rgba(0,0,0,0);">Generated on ${new Date().toLocaleString()} by <a href="https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/" style="color: rgba(0,0,0,0); text-decoration: none;"  >twitter-to-static-html tool</a></p>`;
   
       html += `
         </body>
