@@ -59,30 +59,49 @@
       border-radius: 4px;
       font-family: 'Consolas', monospace;
     }
+    .instructions {
+      margin: 1rem 0;
+      padding: 0 2rem;
+    }
+    .instructions ol {
+      margin: 0;
+      padding-left: 2rem;
+
+    }
+    .instructions li {
+      margin-bottom: 1rem;
+      text-align: left;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Twitter Export to Static HTML</h1>
-    <h2>Select your <code>tweets.js</code> file and optionally your <code>note-tweet.js</code> file below.</h2>
-    <p>You can select multipule files by holding the control key while clicking.</p>
-    <p>If you don't include the <code>note-tweets.js</code> file, then any tweets longer than the Twitter max length will be truncated in the output, but there will be a link to view the full tweet on twitter.com.</p>
-    <input type="file" id="file-input" accept=".js,.json" multiple />
+    <p>Read the full article about this tool on <a href="https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/">josh.com</a></p>
+    <div class="instructions">
+      <ol>
+        <li>Click the "Choose Files" button below</li>
+        <li>Select the <code>tweets.js</code> and optionally <code>note-tweet.js</code> files from your twitter export. You can select multipule files by holding the control or command key while clicking.</li>
+        <li>Wait until the status window says the process is complete</li>
+        <li>Click the "Save tweets.html" button to save the newly generated HTML file</li>
+      </ol>
+    </div>
+    <p></p>
+    <input type="file" id="file-input" accept=".js" multiple />
     <div id="progress-area" class="progress-area">
       <h3 class="progress-header">Status</h3>
       <div class="progress-content">
         <p id="progress-message"></p>
+        <p id="warning-message" style="display: none;"></p>
       </div>
     </div>  
 
     <!-- Hidden Static link that will be updated dynamically after the HTML has been generated -->
-    <p><a id="download-link" href="#" download="tweets.html" style="display: none;">Download tweets.html File</a></p>
-    <p><a id="open-link" href="#" target="_blank" style="display: none;">Open in New Tab (note that media will probably not be in the right directory)</a></p>
+    <p><a id="download-link" href="#" download="tweets.html" style="display: none;">Save your new tweets.html file</a></p>
+
+    <!--- <p><a id="open-link" href="#" target="_blank" style="display: none;">Open in New Tab (note that media will probably not be in the right directory)</a></p> -->
 
   </div>
-
-
-
 
   <script>
 
@@ -102,6 +121,15 @@
     }
 
     updateProgressMessage("Waiting for files to be selected and uploaded");
+
+
+    // Remeber the progress element so we can update it faster
+    const progressWarningText = document.getElementById("progress-warning");
+
+    function updateProgressWarningMessage(message) {
+      progressWarningText.textContent = message;
+    }
+
 
     let tweetsContent = null;
 
@@ -776,10 +804,7 @@
           html += ` ${note.timestamp.toLocaleString()}: ${note.normalizedText}<br>`;
         });
 
-        // TODO: Add link to notes page
-        html += 'Please see https://josh.com/xxx#mismatched-notes for more info.<br>';
-        
-        html += `</p>`;
+        updateWarningMessage(`There are ${notesWorkingRecordsSet.size} notes that were not matched to tweets.<br>Please see https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/#mismatched-notes for more info.`);
       }
 
   
