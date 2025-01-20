@@ -301,35 +301,41 @@
         mediaHtml +=  getMediaHtml(t,mediapath,mediaFilenames);
       }
 
+
+      let headerHtml = "";
+
+      headerHtml += `<div class="header">\r`;
+      headerHtml += ` <span class="date">${date2string(tweetWorkingRecord.timestamp,dateFormat)}</span>\r`;
+      headerHtml += ` <span class="id"><a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">ID=${tweetId}</a></span>\r`;
+      headerHtml += `</div>\r`;
+
+
       // ===== Finally we will build up the final html for the tweet so we can return it. 
 
       const threadClass = isThread ? ' thread-tweet' : '';
 
       let tweetHTML = "";
 
-      tweetHTML += `<div class="tweet-container${threadClass}" id="${tweetId}">\r`;
-        
-      tweetHTML += `  <div class="tweet-header">
-        <span class="tweet-date">${date2string(tweetWorkingRecord.timestamp,dateFormat)}</span>
-        <span class="tweet-id"><a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">ID=${tweetId}</a></span>
-      </div>\r`;
+      tweetHTML += `<div class="container${threadClass}" id="${tweetId}">\r`;
+
+      tweetHTML += ` ` +headerHtml;
 
       if (replyHtml) {
-        tweetHTML += `  <div class="tweet-reply-info">${replyHtml}</div>\r`;  
+        tweetHTML += `<div class="reply-info">${replyHtml}</div>\r`;  
       }
 
       if (mentionsHtml) {  
-        tweetHTML += `   <div class="tweet-mentions">${mentionsHtml}</div>\r`;  
+        tweetHTML += `<div class="mentions">${mentionsHtml}</div>\r`;  
       }
 
   
-      tweetHTML += `   <div class="tweet-text">${textHTML}</div>\r`;
+      tweetHTML += `<div class="text">${textHTML}</div>\r`;
 
       if (mediaHtml) {
-        tweetHTML += `   <div class="tweet-media">${mediaHtml}</div>\r`;
+        tweetHTML += `<div class="media">${mediaHtml}</div>\r`;
       }
 
-      tweetHTML += `</div>\r`;    // Close tweet-container
+      tweetHTML += `</div>\r`;    // Close container
 
       return tweetHTML;
 
@@ -616,7 +622,7 @@
               line-height: 1.4;
               background: #f9f9f9;
             }
-            .tweet-container {
+            .container {
               background: #fff;
               margin-top: 1rem;
               margin-bottom: 1px;
@@ -624,29 +630,29 @@
               border: 1px solid #ddd;
               border-radius: 8px;
             }
-            .tweet-container.thread-tweet {                   /* Visually make thread connect to the tweet above them */
+            .container.thread-tweet {                   /* Visually make thread connect to the tweet above them */
               margin-top: 1px;
               border-top: none;         
               border-top-left-radius: 0;
               border-top-right-radius: 0;
             }
-            .tweet-media-grid {
+            .media-grid {
               display: grid;
               grid-gap: 2px;
               margin: 0.5rem 0;
               border-radius: 8px;
               overflow: hidden;
             }
-            .tweet-media-grid.grid-2 {
+            .media-grid.grid-2 {
               grid-template-columns: repeat(2, 1fr);
             }
-            .tweet-media-grid.grid-3 {
+            .media-grid.grid-3 {
               grid-template-columns: repeat(2, 1fr);
             }
-            .tweet-media-grid.grid-3 .media-item:first-child {
+            .media-grid.grid-3 .media-item:first-child {
               grid-column: span 2;
             }
-            .tweet-media-grid.grid-4 {
+            .media-grid.grid-4 {
               grid-template-columns: repeat(2, 1fr);
             }
             .media-item {
@@ -669,55 +675,50 @@
               display: block;
             }
 
-
-
-
-            .tweet-reply-info {
+            .reply-info {
               font-size: 0.85rem;
               color: #555;
               margin-bottom: 0.5rem;
             }
-            .tweet-reply-info a {
+            .reply-info a {
               color: #1da1f2;
               text-decoration: none;
             }
-            .tweet-header {
+            .header {
               font-size: 0.85rem;
-              margin-bottom: 0.5rem;
+              margin-bottom: 1rem;
               display: flex;
               justify-content: space-between;
+              border-bottom: 1px solid #a0a0fa;
+              padding: 0.5rem;
+              border-radius: 8px 8px 0 0;
             }
-            .tweet-date {
+            .date {
             }
-            .tweet-id {
+            .id {
               color: rgb(83, 100, 113);
             }
-            .tweet-text {
+            .text {
               margin-bottom: 0.5rem;
               white-space: pre-wrap;
             }
-            .tweet-link a {
-              font-size: 0.85rem;
-              color: #1da1f2;
-              text-decoration: none;
-            }
-            .tweet-mentions {
+            .mentions {
               margin-top: -0.5rem;
               margin-bottom: 1rem;
               font-size: 0.9rem;
               color: #536471;
             }
-            .tweet-mentions table {
+            .mentions table {
               border-collapse: collapse;
             }
-            .tweet-mentions td {
+            .mentions td {
               padding: 0.2rem 1rem 0.2rem 0;
             }
-            .tweet-mentions a {
+            .mentions a {
               text-decoration: none;
               color: #1DA1F2;
             }
-            .tweet-mentions a:hover {
+            .mentions a:hover {
               text-decoration: underline;
             }
             code {
@@ -860,35 +861,32 @@
       
       // Add a CSS grid class based on number of media items
       const gridClass = mediaFileNames.length > 1 ? ` grid-${Math.min(mediaFileNames.length, 4)}` : '';
-      let mediaHtml = `<div class="tweet-media-grid${gridClass}">\n`;
+      let mediaHtml = `<div class="media-grid${gridClass}">\n`;
 
       mediaFileNames.forEach(m => {
 
           const fullFilename = mediapath + tweet.id_str + "-" + m;
                   
-          mediaHtml += `
-            <div class="media-item">
-            <a href="${fullFilename}" target="_blank" rel="noopener noreferrer">
-            `;
+          mediaHtml += `<div class="media-item"><a href="${fullFilename}" target="_blank" rel="noopener noreferrer">`;
 
             if (m.endsWith('.mp4')) {
 
-              // Browsers will not actually autoplay videos unless they are muted. 
+            // Browsers will not actually autoplay videos unless they are muted. 
 
-              mediaHtml += `<video autoplay loop muted src="${fullFilename}"></video>`;
+            mediaHtml += `<video autoplay loop muted src="${fullFilename}"></video>`;
 
-            } else {
+          } else {
 
-              // image
+            // image
 
-              mediaHtml += `<img src="${fullFilename}" loading="lazy" />`;
+            mediaHtml += `<img src="${fullFilename}" loading="lazy" />`;
 
-            } 
-              
-            mediaHtml += `</a></div>\n`;    // media-item
+          } 
+            
+          mediaHtml += `</a></div>\n`;    // media-item
         });
       
-      mediaHtml += '</div>';    // media-grid
+      mediaHtml += '</div>\n';    // media-grid
       return mediaHtml;
     }
 
