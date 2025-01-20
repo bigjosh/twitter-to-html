@@ -236,15 +236,15 @@
     // Helper function to render a single tweet
     // expansion from a short tweet to a long note happens here if there is a matching note
     // We need to provide the full list of tweet so we can localize internal links. 
-    function renderTweet(normalizedTweet, isThread , tweetsWorkingRecords) {
+    function renderTweet(tweetWorkingRecord, isThread , tweetsWorkingRecords) {
 
-      const t = normalizedTweet.tweet;      // The orginal tweet object
+      const t = tweetWorkingRecord.tweet;      // The orginal tweet object
 
       // now create the html for the mentions section
       let mentionsHtml = '';
-      if (normalizedTweet.mentions.length > 0) {
+      if (tweetWorkingRecord.mentions.length > 0) {
         mentionsHtml += `<table>\r`;              
-        normalizedTweet.mentions.forEach(m => {
+        tweetWorkingRecord.mentions.forEach(m => {
           mentionsHtml += ` <tr><td><a href="https://x.com/${m.screen_name}" target="_blank" rel="noopener noreferrer">@${m.screen_name}</a></td><td>${m.name}</td></tr>\r`;              
         });
         mentionsHtml += `</table>\r`;              
@@ -279,16 +279,26 @@
         replyHtml = `In reply to <a href="${replyToUrl}" target="_blank" rel="noopener noreferrer">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>`+localLinkHtml;
         
       }
-      // Next build the media HTML, if any
-      // NOte the media file names need to have the tweet id and a '-' prepended to match the file names in the media folder
 
-      const mediaFilenames = getMediaFilenames(normalizedTweet.media);
+      // The meat of the tweet
+      let textHTML = '';
+
+      if (tweetWorkingRecord.hasOwnProperty('normalizedNoteText') ) {   // We added `normalizedNoteText` property above in cases where we found a matching note (long form of a tweet )
+        textHTML = tweetWorkingRecord.normalizedNoteText;  // Long tweet
+      } else {
+        textHTML = tweetWorkingRecord.normalizedText;       // Short tweet
+      }
+
+      // Next build the media HTML, if any
+
+      const mediaFilenames = getMediaFilenames(tweetWorkingRecord.media);
 
       let mediaHtml = "";
 
       // Only bother to include the mdia div is there is any media. 
       if (mediaFilenames.length > 0) {
-        mediaHtml += tweetId + "-" + getMediaHtml(t,mediapath,mediaFilenames);
+        
+        mediaHtml +=  getMediaHtml(t,mediapath,mediaFilenames);
       }
 
       // ===== Finally we will build up the final html for the tweet so we can return it. 
@@ -300,7 +310,7 @@
       tweetHTML += `<div class="tweet-container${threadClass}" id="${tweetId}">\r`;
         
       tweetHTML += `  <div class="tweet-header">
-        <span class="tweet-date">${date2string(normalizedTweet.timestamp,dateFormat)}</span>
+        <span class="tweet-date">${date2string(tweetWorkingRecord.timestamp,dateFormat)}</span>
         <span class="tweet-id"><a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">ID=${tweetId}</a></span>
       </div>\r`;
 
@@ -312,13 +322,14 @@
         tweetHTML += `   <div class="tweet-mentions">${mentionsHtml}</div>\r`;  
       }
 
-      // Here is the beef
-      tweetHTML += `   <div class="tweet-text">${normalizedTweet.normalizedText}</div>\r`;
+  
+      tweetHTML += `   <div class="tweet-text">${textHTML}</div>\r`;
 
       if (mediaHtml) {
         tweetHTML += `   <div class="tweet-media">${mediaHtml}</div>\r`;
       }
-      tweetHTML += `</div>\r`;
+
+      tweetHTML += `</div>\r`;    // Close tweet-container
 
       return tweetHTML;
 
@@ -514,7 +525,7 @@
           return b.sequence - a.sequence;  // Highest sequnce first since threaded tweets come in inverse order int tweets.js
         }
 
-        // Sort by timestamp, oldest first
+        // When tweets have the same timestamp, the one that came highest in the orginal tweets.js file first
         return a.timestamp.getTime() - b.timestamp.getTime();     
 
       });
@@ -543,6 +554,9 @@
       // If we find a match, then we add a new property called `note` to the record in tweetsWorkingRecords so that we can use it in the final HTML
       // We also remove the note from the set so we do not try to use it again.
 
+      // UPDATE: It turns out that the timestamps on a tweet and its corresponding note tweet are not always the same! Arggggghh!
+      //         So now we will have to first filter all text matches, and then pick theone that is closest in time.
+      
       tweetsWorkingRecords.forEach( tweetRecord => {
 
         // Remember that the short tweet will still have a trailing elipses if it is a note tweet since we do not know if that was added by 
@@ -550,14 +564,39 @@
 
         let normalizedShortTweetTextWithoutTrailingElipsis = removeTrailingChar(tweetRecord.normalizedText, "…");
 
-        let matchingNote = findAndRemoveMatchingNote(tweetRecord.timestamp, normalizedShortTweetTextWithoutTrailingElipsis, notesWorkingRecordsSet);
 
-        if (matchingNote) {
+        // Javascript does not have a Set.filter() method, so we have to do this the old fashioned way
+
+
+        let matchingTextNotes = [];
+        
+        notesWorkingRecordsSet.forEach( noteRecord => {
+
+          // We compare the (already normalized) leading text of the note to the (already normalized) leading text of the short tweet - but we have to remove the trailing ... from the short tweet
+          if ( noteRecord.normalizedText.startsWith(normalizedShortTweetTextWithoutTrailingElipsis) ) {
+            matchingTextNotes.push(noteRecord);
+          }
+        });
+
+        // Now matchingTextNotes is an array of note records that have the same leading text as the short tweet. We need to find the one that is closest in time.
+
+        if (matchingTextNotes.length > 0) {
+
+          const bestMatchingNoteRecord = matchingTextNotes.reduce(( bestMatchingNoteRecordSoFar, currentNoteRecord ) => {
+            if ( Math.abs(currentNoteRecord.timestamp.getTime() - tweetRecord.timestamp.getTime()) < Math.abs(bestMatchingNoteRecordSoFar.timestamp.getTime() - tweetRecord.timestamp.getTime()) ) {
+              return currentNoteRecord;
+            } else {
+              return bestMatchingNoteRecordSoFar;
+            }
+          });
 
           // We found a match so add the note to the tweet record
-          tweetRecord.note = matchingNote;
+          tweetRecord.normalizedNoteText = bestMatchingNoteRecord.normalizedText;
 
-        }
+          // Remove the note from the set so we do not try to use it again
+          notesWorkingRecordsSet.delete(bestMatchingNoteRecord);
+
+        }        
 
       }); 
 
@@ -622,12 +661,17 @@
             .media-item a:hover {
               opacity: 0.9;
             }
-            .media-item img {
+            .media-item img,
+            .media-item video {
               width: 100%;
               height: auto;
               object-fit: cover;
               display: block;
             }
+
+
+
+
             .tweet-reply-info {
               font-size: 0.85rem;
               color: #555;
@@ -745,7 +789,6 @@
       return html;
     }
 
-
     // For a media in a tweet's extended_entities, this will find the URL that actually coesponds to the media filename that is included in the export (at least for all cases I can check)
     
     function getMediaURL(m) {
@@ -759,7 +802,7 @@
 
         const maxVariant = m.video_info.variants.filter(variant => variant.content_type === 'video/mp4').reduce((highest, current) => {
             if (!current.bitrate) showError("Missing bitrate in video variant");
-            return current.bitrate > highest.bitrate ? current : highest;
+            return (parseInt(current.bitrate) > parseInt(highest.bitrate)) ? current : highest;
         });
 
         // Extract filename from URL
@@ -820,19 +863,32 @@
       let mediaHtml = `<div class="tweet-media-grid${gridClass}">\n`;
 
       mediaFileNames.forEach(m => {
+
+          const fullFilename = mediapath + tweet.id_str + "-" + m;
                   
           mediaHtml += `
             <div class="media-item">
-            <a href="${mediapath}${m}" target="_blank" rel="noopener noreferrer">
-              <img src="${mediapath}${tweet.id_str}-${m}" 
-                  alt="Tweet media" 
-                  style="width: 100%; height: auto;"
-                  loading="lazy" />
-            </a>
-          </div>\n`;
+            <a href="${fullFilename}" target="_blank" rel="noopener noreferrer">
+            `;
+
+            if (m.endsWith('.mp4')) {
+
+              // Browsers will not actually autoplay videos unless they are muted. 
+
+              mediaHtml += `<video autoplay loop muted src="${fullFilename}"></video>`;
+
+            } else {
+
+              // image
+
+              mediaHtml += `<img src="${fullFilename}" loading="lazy" />`;
+
+            } 
+              
+            mediaHtml += `</a></div>\n`;    // media-item
         });
       
-      mediaHtml += '</div>';
+      mediaHtml += '</div>';    // media-grid
       return mediaHtml;
     }
 
