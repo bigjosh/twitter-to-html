@@ -2,6 +2,7 @@
 <!-- This page is (c) 2025 josh levine [josh.com]. For more info, check out josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/ -->
 <html>
 <head>
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
   <meta charset="UTF-8" />
   <title>Twitter Export to Static HTML</title>
   <style>
@@ -73,6 +74,7 @@
       margin-bottom: 1rem;
       text-align: left;
     }
+
   </style>
 </head>
 <body>
@@ -216,6 +218,7 @@
       } catch (err) {
         alert("Error: " + err.message + "\n" + err.stack);
         console.error(err);
+        updateProgressMessage("Error: <hr>" + err.message +"<hr>visit <a href=\"https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/#error\" target=\"_blank\">josh.com</a> for more info.");  
       }
     });
 
@@ -247,6 +250,64 @@
         .replace(/>/g, '&gt;')
         .replace(/\r?\n/g, '<br>')
         .replace(/"/g, '&quot;');
+    }
+
+    // Returns an array of tweetRecords that are replies to the tweet 
+
+    function getFollowupRecords(tweet, tweetsWorkingRecords) {
+
+      let followsups = [];
+
+
+      // For every tweet we have, check if that tweet is a reply to the tweet we are currently processing
+      tweetsWorkingRecords.forEach(t => {
+        if (t.tweet.in_reply_to_status_id_str && t.tweet.in_reply_to_status_id_str === tweet.id_str ) {
+          followsups.push(t);
+        }
+
+      }); 
+
+      return followsups;
+    }
+
+    // From https://www.geeksforgeeks.org/how-to-strip-out-html-tags-from-a-string-using-javascript/?ref=ml_lbp
+
+    function removeHTMLTags(str) {
+        str = str.toString();
+
+        // Regular expression to identify HTML tags in
+        // the input string. Replacing the identified
+        // HTML tag with a null string.
+        return str.replace(/(<([^>]+)>)/ig, '');
+    }
+
+    // Find all internal replies to this tweet and create a list of them
+    function getFollowupsHtml(tweet, tweetsWorkingRecords) {
+
+      let html = "";
+
+      let followsups = getFollowupRecords(tweet, tweetsWorkingRecords);
+
+      if (followsups.length > 0) {
+
+        // Sort the followups by oldest first
+        followsups.sort((a, b) => new Date(a.tweet.createdAt) - new Date(b.tweet.createdAt));
+
+        html += `<div class="followups">`;
+        html += `Follow-ups:`;
+
+        followsups.forEach(f => {
+
+          const textBlurb = removeHTMLTags(f.normalizedText);   // Make a text-only preview blurb of the tweet 
+
+          // Put in the date and the blurb and make the blurb an anchor link to the tweet
+          html += `<div class="followup">${ date2string( f.timestamp , dateFormat )} - <a href="#${f.tweet.id_str}">${textBlurb}</a></div>\r`;
+        });
+
+        html += `</div>`; // <div class="followups">
+      }
+
+      return html;
     }
 
 
@@ -332,6 +393,10 @@
         mediaHtml +=  getMediaHtml(t,mediapath,mediaFilenames);
       }
 
+      // Next add links to any of our internal reples to this tweet (I call them "followups")
+      // Goes through all tweets to see which ones are replies to this tweet
+
+      const followupsHtml = getFollowupsHtml(t, tweetsWorkingRecords);
 
       let headerHtml = "";
 
@@ -366,29 +431,16 @@
         tweetHTML += `<div class="media">${mediaHtml}</div>\r`;
       }
 
+      tweetHTML += followupsHtml;       // This will be empty if there are no followups
+
       tweetHTML += `</div>\r`;    // Close container
 
       return tweetHTML;
 
     }
 
-    // Tries to find a matching note tweet. Assumes that the normalizedShortTweetText does not have trailing elipses.
-    // If a match is found, then it is removed from the notesWorkingRecordsSet and we return the matching note record.
-    // If no match is found, then returns null
 
-    function findAndRemoveMatchingNote(timestamp, normalizedShortTweetText, notesWorkingRecordsSet) {
-      // We can not use a find on the set because we have to do a partial match on the text
-      for (let noteRecord of notesWorkingRecordsSet) {
-        if (noteRecord.timestamp.getTime() === timestamp.getTime() && noteRecord.normalizedText.startsWith(normalizedShortTweetText)) {
-          notesWorkingRecordsSet.delete(noteRecord);   // Remove the note from the set so we can only use it once
-          return noteRecord;
-        }
-      }
-      return null;  // If no match found, return null
-    }
-
-
-    function removeTrailingChar(str, charToRemove) {
+    function removeTrailingCharIfPresent(str, charToRemove) {
       if (str.endsWith(charToRemove)) {
           return str.slice(0, -1);
       }
@@ -413,17 +465,18 @@
       return format.replace(/YYYY|MM|DD|HH|hh|mm|ss|AP/g, match => replacements[match]);
     }    
 
+    function foldMatchingNoteRecordsIntoTweetRecords(tweetRecords,noteRecordSet) {
+    }
+
     /**
      * Generates a complete static HTML document from an array of tweet objects.
      * This HTML contains no JavaScript and references images in the `tweets_media` folder.
      * If no notes, then pass an empty array.
-     * Tweets will be exported in the order they are in the array. Notes should be sorted in same order so that they line up with tweets.
-     * It is very hard to match tweets with notes, so it is still possible to get them out of order.
+     * It is very hard to match tweets with notes.
      */
 
 
     function generateStaticHTML(tweets,notes) {
-
 
       // It looks like embeded URLs are different between the two versions of the tweet, so we need to expand them before comparing them. Urgh. 
       // They also use different escapeing functions, so we will have to normalize the texts before we can try finding matches.
@@ -431,7 +484,7 @@
       // notes: "text"       : "Sadly it seams that https://t.co/XVzYx757Tu leaked my email address (and probably yours) to spammers.\n#surprisingspam\n\nHow I know:\nhttps://t.co/bzKbdOkkrX\n\n(Interestingly, GMAIL silently ghosted this spam.  It is good that they correctly classified it as spam, but it is scary that they think it is ok to accept an email and then completely erase any record that it ever existed. Beware.)",
 
       // Make a set of notes since we can only use each note once. This will also make it faster to look the notes up.
-      let notesWorkingRecordsSet = new Set();
+      let notesWorkingRecords = [];
 
       // We pre-exapand all the URLs notes so we can search on them (the tiny URLs are different between the short tweet and the long note tweet)
       // We have to escape the special chars for HTML first before we can expand the URLs becuase they will have HTML in them. 
@@ -444,18 +497,20 @@
 
         //console.log("Note time: " + new Date(note.createdAt));
 
+        const noteText = note.core.text ?? "";      // I've never seen a note without text, but there are tweets without a text property so...
+
         // We have to escape the special chars for HTML first before we can expand the URLs becuase they will have HTML in them.
         // but anoyingly tweets and notes have different special chars that are preexpanded so we have to handle them seporately
-        let noteText = escapeNoteSpecialCharsToHtml(note.core.text);    
+        const escapedNoteText = escapeNoteSpecialCharsToHtml(noteText);    
         
         // ANd now we can expand all the URLs. We have to do this becuase the tiny URLs are different between the short tweet and the long note tweet
 
-        noteText = expandUrls(noteText, note.core.urls, "shortUrl", "displayUrl", "expandedUrl");
+        const expandedAndEscapedNoteText = expandUrls(escapedNoteText, note.core.urls, "shortUrl", "displayUrl", "expandedUrl");
 
         //console.log("Note out : " + noteText); 
-        
-        notesWorkingRecordsSet.add({
-          "normalizedText": noteText,
+      
+        notesWorkingRecords.push({
+          "normalizedText": expandedAndEscapedNoteText,
           "timestamp": new Date(note.createdAt)
         });
       });
@@ -466,12 +521,15 @@
 
       let tweetcount = 0;
 
+      // Working set of tweets used inside generateStaticHTML()
+      // we modify this to match notes up with the tweets by adding a new property `normalizedNoteText`
       let tweetsWorkingRecords = [];      
       
       tweets.forEach( tweet => {  
 
         // Starting point is the full text of the tweet
-        let text = tweet.full_text;
+
+        let text = tweet.full_text ?? "";     // If a tweet only has media then the full_text is missing
 
         // First we strip all of the media URLs from the short tweet since they do not appear in the long note tweet
         // We will add the media into the output HTML later. 
@@ -543,30 +601,12 @@
 
       });
 
+      console.log("Found " + tweetcount + " tweets.");
+
       // Now we have a nice list tweets in the tweetsWorkingRecords array with normalized text, timestamp, media, and mentions. Everything we need to emit the final output.
 
-      // NOW IS A GOOD TIME TO SORT THE TWEETS 
-
-      // We sort the tweets by date, oldest first.
-      // This makes displaying tweetstorms more natural, and also maybe better for SEO?
-      // If you invert the sort order then you might want to change the localLinkIndicator to a down arrow
-
-      // It seems that tweetstorms all get the same timestamp, so we use the sequence number to break ties
-
-      updateProgressMessage("Sorting tweets...");
-
-      const sortedTweetWorkingRecords = tweetsWorkingRecords.sort((a, b) =>  {
-
-        // If two tweets have the same timestamp, the one that came earlier in the tweet.js file should come first
-        if (a.timestamp.getTime() === b.timestamp.getTime()) {
-          return b.sequence - a.sequence;  // Highest sequnce first since threaded tweets come in inverse order int tweets.js
-        }
-
-        // When tweets have the same timestamp, the one that came highest in the orginal tweets.js file first
-        return a.timestamp.getTime() - b.timestamp.getTime();     
-
-      });
-
+      // --- The hard problem of match notes to tweets is here ---
+      // I'd like to break this into a function, but it mus modify the tweetsWorkingRecords array so not a good idea
 
       // Now that both notes and tweets text have been normalized, we can start comparing them to find matches
       // If we find a match, then we replace the normalized text in tweetsworkingrecords with the normalized text from the note
@@ -590,54 +630,155 @@
       // OK now we can go looking to see if there is an unused note that matches this tweet's (1) timestamp and (2) leading text
       // If we find a match, then we add a new property called `note` to the record in tweetsWorkingRecords so that we can use it in the final HTML
       // We also remove the note from the set so we do not try to use it again.
+      
 
       // UPDATE: It turns out that the timestamps on a tweet and its corresponding note tweet are not always the same! Arggggghh!
       //         So now we will have to first filter all text matches, and then pick theone that is closest in time.
-      
-      tweetsWorkingRecords.forEach( tweetRecord => {
 
-        // Remember that the short tweet will still have a trailing elipses if it is a note tweet since we do not know if that was added by 
-        // twitter or actually part of the tweet entered by the user (I tested and you can end a tweet with an elipses https://x.com/bigjoshlevine/status/1879368393918451727)  
+      // UPDATE: Turns out there are notes that are empty and tweets that are empty which makes matching harder.
+      //         New strategy is to sort both notes and tweet by text length + timestamp so that we get the longest text first and oldest first with ties.
+      //         The we can scan down the notes in this order and look for the longest then oldest matching tweet.
 
-        let normalizedShortTweetTextWithoutTrailingElipsis = removeTrailingChar(tweetRecord.normalizedText, "…");
+      let notesWorkingRecordsSoretedLongestOldestFirst = notesWorkingRecords.sort( (a,b) => {
+        if (a.normalizedText.length === b.normalizedText.length) {
+          return a.timestamp - b.timestamp;
+        } else {
+          return b.normalizedText.length - a.normalizedText.length;
+        }
+      });
 
-
-        // Javascript does not have a Set.filter() method, so we have to do this the old fashioned way
-
-
-        let matchingTextNotes = [];
-        
-        notesWorkingRecordsSet.forEach( noteRecord => {
-
-          // We compare the (already normalized) leading text of the note to the (already normalized) leading text of the short tweet - but we have to remove the trailing ... from the short tweet
-          if ( noteRecord.normalizedText.startsWith(normalizedShortTweetTextWithoutTrailingElipsis) ) {
-            matchingTextNotes.push(noteRecord);
-          }
-        });
-
-        // Now matchingTextNotes is an array of note records that have the same leading text as the short tweet. We need to find the one that is closest in time.
-
-        if (matchingTextNotes.length > 0) {
-
-          const bestMatchingNoteRecord = matchingTextNotes.reduce(( bestMatchingNoteRecordSoFar, currentNoteRecord ) => {
-            if ( Math.abs(currentNoteRecord.timestamp.getTime() - tweetRecord.timestamp.getTime()) < Math.abs(bestMatchingNoteRecordSoFar.timestamp.getTime() - tweetRecord.timestamp.getTime()) ) {
-              return currentNoteRecord;
-            } else {
-              return bestMatchingNoteRecordSoFar;
-            }
-          });
-
-          // We found a match so add the note to the tweet record
-          tweetRecord.normalizedNoteText = bestMatchingNoteRecord.normalizedText;
-
-          // Remove the note from the set so we do not try to use it again
-          notesWorkingRecordsSet.delete(bestMatchingNoteRecord);
-
-        }        
-
+      // This is not const becuase we will remove matched tweets from this list as we go 
+      // we have to use `from` becuase javascript array.sort apparently sorts records in place(!) and returns the original array. wtf js. 
+      let tweetsWorkingRecordsSortedLongestOldestFirst = Array.from(tweetsWorkingRecords).sort( (a,b) => {
+        if (a.normalizedText.length === b.normalizedText.length) {
+          return a.timestamp - b.timestamp;
+        } else {
+          return b.normalizedText.length - a.normalizedText.length;
+        }
       }); 
 
-      // Build the final HTML    
+
+      // Tries tofind the best matching tweet, or returns null if no tweet matches
+      // sortedTweetsRecords should be in order from longest to shortest, and inside each length the oldest first
+
+      function findBestMatchingTweetRecord(noteRecord,sortedTweetsRecords) {
+        
+        // Scan though all tweets still in the list
+        sortedTweetsRecords.forEach( tweetRecord => {
+
+
+          //console.log(  `checking tweet ${tweetRecord.normalizedText.length}: `+ JSON.stringify(tweetRecord) );
+
+          // Remove the trailing "..." from the text if present because the note will not have it. 
+          const normalizedShortTweetTextWithoutTrailingElipsis = removeTrailingCharIfPresent(tweetRecord.normalizedText, "…");
+
+          // if (tweetRecord.normalizedText.includes("photobombs")) {
+          //   console.log("note :" + noteRecord.normalizedText);
+          //   console.log("norml:" + normalizedShortTweetTextWithoutTrailingElipsis);
+          //   console.log("reslt:" + noteRecord.normalizedText.startsWith(normalizedShortTweetTextWithoutTrailingElipsis) );
+          // }
+
+          //console.log( "note :" + noteRecord.normalizedText );
+          //console.log( "tweet:" + normalizedShortTweetTextWithoutTrailingElipsis );
+
+          if (noteRecord.normalizedText.startsWith(normalizedShortTweetTextWithoutTrailingElipsis) ) {
+
+            // console.log("match");
+          
+            // We found a match for this note.
+            return tweetRecord;
+
+          }
+
+        });
+
+        // console.log("no match");
+
+        // No match found. This is kinda wierd 
+        return null;
+      }
+
+      // Scan though each note and try to find the best matching tweet      
+
+      notesWorkingRecordsSoretedLongestOldestFirst.forEach( noteRecord => {
+
+        // if (noteRecord.normalizedText.includes("photobombs")) {
+        //   console.log(  `note :${noteRecord.normalizedText}` );
+        // }
+
+        const bestMatchingTweetRecord = findBestMatchingTweetRecord(noteRecord,tweetsWorkingRecordsSortedLongestOldestFirst);
+
+        if (bestMatchingTweetRecord) {
+
+            // if (noteRecord.normalizedText.includes("photobombs")) { 
+            //   console.log(`tweet: ${bestMatchingTweetRecord.normalizedText}`);
+            // }
+            //console.log(  `Found matching tweet ${bestMatchingTweetRecord.normalizedText.length}: `+ JSON.stringify(bestMatchingTweetRecord) );
+
+            // Do a sanity check just to try to protect against the case where a note has not real matching tweet
+            // so it ends up matching with a tweet that is short enough that the begiing of the tweet is the same as the note.
+            // This can happen trivially becuase tweets can have zero length.
+
+            const timeDistance = Math.abs(noteRecord.timestamp.getTime() - tweetRecord.timestamp.getTime());
+
+            if (timeDistance > 86400000) {    // One day in milliseconds
+              alert(`tweet ${noteRecord.tweet.id_str} more than a day away from note ${bestMatchingTweetRecord.tweet.id_str}`);
+              console.log(  `matching tweet more than a daya away from the note`);
+              console.log(  `timeDistance: ${timeDistance} `);
+              console.log(  `note ${noteRecord.normalizedText.length}: `+ JSON.stringify(noteRecord) );
+              console.log(  `tweet ${tweetRecord.normalizedText.length}: `+ JSON.stringify(bestMatchingTweetRecord) );
+            }                        
+
+          // Add the note text to the matching tweet
+          bestMatchingTweetRecord.normalizedNoteText = noteRecord.normalizedText;
+
+          // Remove the matching tweet from the list so we do not try to use it again
+          bestMatchingTweetRecord.matchedNote = noteRecord;
+          tweetsWorkingRecordsSortedLongestOldestFirst.splice(tweetsWorkingRecordsSortedLongestOldestFirst.indexOf(bestMatchingTweetRecord), 1);
+
+        } else {
+          // TODO: Make this a warning
+
+          // if (noteRecord.normalizedText.includes("photobombs")) {
+          //   console.log(  `=Nomatch`); 
+          // }
+        }
+
+      });
+
+      //  free up the list we used for matching since they are not used anymore
+      tweetsWorkingRecordsSortedLongestOldestFirst.length = 0;  // Clear the array
+      tweetsWorkingRecordsSortedLongestOldestFirst = null;      // Remove the reference
+      notesWorkingRecordsSoretedLongestOldestFirst.length = 0;  // Clear the array
+      notesWorkingRecordsSoretedLongestOldestFirst = null;      // Remove the reference
+
+      // When we get here, every note should have been assigned to the best matching tweet. 
+
+      // OK, now all notes have been matched to their best tweet
+
+      // NOW IS A GOOD TIME TO SORT THE TWEETS FOR DISPLAY
+
+      // We sort the tweets by date, oldest first.
+      // This makes displaying tweetstorms more natural, and also maybe better for SEO?
+      // If you invert the sort order then you might want to change the localLinkIndicator to a down arrow
+
+      // It seems that tweetstorms all get the same timestamp, so we use the sequence number to break ties
+
+      updateProgressMessage("Sorting ${tweetsWorkingRecords.length} tweets...");
+
+      const sortedTweetWorkingRecords = tweetsWorkingRecords.sort((a, b) =>  {
+
+        // If two tweets have the same timestamp, the one that came earlier in the tweet.js file should come first
+        if (a.timestamp.getTime() === b.timestamp.getTime()) {
+          return b.sequence - a.sequence;  // Highest sequnce first since threaded tweets come in inverse order int tweets.js
+        }
+
+        // When tweets have the same timestamp, the one that came highest in the orginal tweets.js file first
+        return a.timestamp.getTime() - b.timestamp.getTime();     
+
+      });
+    
+      // Build the final HTML     
 
       let html = `
         <!DOCTYPE html>
@@ -752,6 +893,22 @@
             .mentions a:hover {
               text-decoration: underline;
             }
+
+            .followups {
+              margin: 1rem 0;
+              padding: 0 2rem;
+              font-size: 0.85rem;
+              color: #555;
+            }
+
+            .followup  {
+              white-space: nowrap;
+              overflow: hidden;
+              display: block;
+
+              text-overflow: ellipsis; /* Add ellipsis for overflowed text */
+            }
+
             code {
               white-space: nowrap;
               background-color: #e3f2fd;  /* Light blue background */
@@ -760,6 +917,8 @@
               border-radius: 4px;
               font-family: 'Consolas', monospace;
             }
+
+
           </style>
         </head>
         <body>
@@ -793,22 +952,6 @@
         previousTweetId = tweetWorkingRecord.tweet.id_str;
 
       });
-
-      // I would not expect there to be any unmatched notes, but lets check becuase if there is that means we missed some
-      // matching rule. These rules were all emperically found from my own data, so maybe there are others in other people's data
-
-      if (notesWorkingRecordsSet.size > 0) {
-        console.log("Remaining notes that were not matched to tweets:", notesWorkingRecordsSet.size);
-        console.log(Array.from(notesWorkingRecordsSet));
-
-        html += `<p style="background-color: #fff0f0;">There are ${notesWorkingRecordsSet.size} notes that were not matched to tweets:<br>`
-
-        notesWorkingRecordsSet.forEach(note => {
-          html += ` ${note.timestamp.toLocaleString()}: ${note.normalizedText}<br>`;
-        });
-
-        updateWarningMessage(`There are ${notesWorkingRecordsSet.size} notes that were not matched to tweets.<br>Please see https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/#mismatched-notes for more info.`);
-      }
 
 
       html += `<p style="color: rgba(0,0,0,0);">Generated on ${new Date().toLocaleString()} by <a href="https://wp.josh.com/2025/01/19/a-utility-to-create-a-static-html-website-from-your-twitter-posts/" style="color: rgba(0,0,0,0); text-decoration: none;"  >twitter-to-static-html tool</a></p>`;
