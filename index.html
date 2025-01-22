@@ -254,14 +254,18 @@
 
     // Returns an array of tweetRecords that are replies to the tweet 
 
-    function getFollowupRecords(tweet, tweetsWorkingRecords) {
+    function getFollowupRecords(tweetRecord, tweetsWorkingRecords) {
 
       let followsups = [];
 
-
       // For every tweet we have, check if that tweet is a reply to the tweet we are currently processing
+      // But do not show as a follow up if that follow up is the next tewwet in a storm since it will visually be right below us anyway. 
       tweetsWorkingRecords.forEach(t => {
-        if (t.tweet.in_reply_to_status_id_str && t.tweet.in_reply_to_status_id_str === tweet.id_str ) {
+        if (
+          t.tweet.in_reply_to_status_id_str && 
+          t.tweet.in_reply_to_status_id_str === tweetRecord.tweet.id_str &&     // We found a tweet that is a reply to the one we are currently processing
+          !(t.tweet.id_str === tweetRecord.nextReplyInStorm)                        // We dont consider the next tweet in a storm to be a followup
+        ) {
           followsups.push(t);
         }
 
@@ -282,19 +286,24 @@
     }
 
     // Find all internal replies to this tweet and create a list of them
-    function getFollowupsHtml(tweet, tweetsWorkingRecords) {
+    function getFollowupsHtml(tweetRecord, tweetsWorkingRecords) {
 
       let html = "";
 
-      let followsups = getFollowupRecords(tweet, tweetsWorkingRecords);
+      let followsups = getFollowupRecords(tweetRecord, tweetsWorkingRecords);
 
       if (followsups.length > 0) {
+
+        html += `<div class="followups">`;
 
         // Sort the followups by oldest first
         followsups.sort((a, b) => new Date(a.tweet.createdAt) - new Date(b.tweet.createdAt));
 
-        html += `<div class="followups">`;
-        html += `Follow-ups:`;
+        if (followsups.length > 1) {
+          html += "Followups:";
+        } else {
+          html += "Followup:"; 
+        } 
 
         followsups.forEach(f => {
 
@@ -303,6 +312,7 @@
           // Put in the date and the blurb and make the blurb an anchor link to the tweet
           html += `<div class="followup">${ date2string( f.timestamp , dateFormat )} - <a href="#${f.tweet.id_str}">${textBlurb}</a></div>\r`;
         });
+
 
         html += `</div>`; // <div class="followups">
       }
@@ -328,7 +338,7 @@
     // Helper function to render a single tweet
     // expansion from a short tweet to a long note happens here if there is a matching note
     // We need to provide the full list of tweet so we can localize internal links. 
-    function renderTweet(tweetWorkingRecord, isThread , tweetsWorkingRecords) {
+    function renderTweet(tweetWorkingRecord, tweetsWorkingRecords) {
 
       const t = tweetWorkingRecord.tweet;      // The orginal tweet object
 
@@ -337,7 +347,7 @@
       if (tweetWorkingRecord.mentions.length > 0) {
         mentionsHtml += `<table>\r`;              
         tweetWorkingRecord.mentions.forEach(m => {
-          mentionsHtml += ` <tr><td><a href="https://x.com/${m.screen_name}" target="_blank" rel="noopener noreferrer">@${m.screen_name}</a></td><td>${m.name}</td></tr>\r`;              
+          mentionsHtml += ` <tr><td><a href="https://x.com/${m.screen_name}" target="_blank">@${m.screen_name}</a></td><td>${m.name}</td></tr>\r`;              
         });
         mentionsHtml += `</table>\r`;              
       }
@@ -351,8 +361,8 @@
       // Check if this is a reply tweet
       let replyHtml = '';
 
-      // Suppress the reply to line if this is in a thread (so it is obviously a reply to the tweet above it)
-      if (t.in_reply_to_status_id_str && !isThread) {  
+      // Suppress the reply to line if this is a followp (so it is obviously a reply to the tweet above it)
+      if (t.in_reply_to_status_id_str && !tweetWorkingRecord.isStormReply) {  
 
         const replyToUrl = `https://x.com/${t.in_reply_to_screen_name}/status/${t.in_reply_to_status_id_str}`;
 
@@ -368,7 +378,7 @@
         }
 
         // Link back to the tweet on x.com and inlcude the local link if there is a match
-        replyHtml = `In reply to <a href="${replyToUrl}" target="_blank" rel="noopener noreferrer">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>`+localLinkHtml;
+        replyHtml = `In reply to <a href="${replyToUrl}" target="_blank">@${t.in_reply_to_screen_name}/${t.in_reply_to_status_id_str}</a>`+localLinkHtml;
         
       }
 
@@ -395,29 +405,35 @@
 
       // Next add links to any of our internal reples to this tweet (I call them "followups")
       // Goes through all tweets to see which ones are replies to this tweet
+      // Automatically suppresses references to "followups" that are the next tweet in a storm
 
-      const followupsHtml = getFollowupsHtml(t, tweetsWorkingRecords);
+      const followupsHtml = getFollowupsHtml(tweetWorkingRecord, tweetsWorkingRecords);
+      
 
       let headerHtml = "";
 
-      headerHtml += `<div class="header">\r`;
+      headerHtml += `<div class="tm">\r`; // Top matter
       headerHtml += ` <span class="date">${date2string(tweetWorkingRecord.timestamp,dateFormat)}</span>\r`;
-      headerHtml += ` <span class="id"><a href="${tweetUrl}" target="_blank" rel="noopener noreferrer">ID=${tweetId}</a></span>\r`;
+      headerHtml += ` <span class="id"><a href="${tweetUrl}" target="_blank">ID=${tweetId}</a></span>\r`;
       headerHtml += `</div>\r`;
 
 
       // ===== Finally we will build up the final html for the tweet so we can return it. 
 
-      const threadClass = isThread ? ' thread-tweet' : '';
-
       let tweetHTML = "";
 
-      tweetHTML += `<div class="container${threadClass}" id="${tweetId}">\r`;
+      let className = "tweet";
+
+      if (tweetWorkingRecord.isStormReply) {
+        className += " storm-reply";              // Decorate strom replies so they vistually nestle into the tweet above they are in reply to
+      } 
+
+      tweetHTML += `<div class="${className}" id="${tweetId}">\r`;      // Putting the ID here lets us deep link to a specific tweet by adding # in front of the ID  
 
       tweetHTML += ` ` +headerHtml;
 
       if (replyHtml) {
-        tweetHTML += `<div class="reply-info">${replyHtml}</div>\r`;  
+        tweetHTML += `<div class="reply">${replyHtml}</div>\r`;  
       }
 
       if (mentionsHtml) {  
@@ -777,6 +793,24 @@
         return a.timestamp.getTime() - b.timestamp.getTime();     
 
       });
+
+      // Finally lets mark all tweets that are part of a tweetstorm (consecutive replies to our own tweet) so
+      // that we can condense these visually. 
+
+      let prevTweetWorkingRecord = null;
+
+      sortedTweetWorkingRecords.forEach( (t) => {
+
+        if(t.tweet.in_reply_to_status_id_str && t.tweet.in_reply_to_status_id_str === prevTweetWorkingRecord.tweet.id_str) {
+
+          t.isStormReply = true;    
+          prevTweetWorkingRecord.nextReplyInStorm = t.tweet.id_str;
+
+        }
+
+        prevTweetWorkingRecord = t;
+
+      });
     
       // Build the final HTML     
 
@@ -794,7 +828,7 @@
               line-height: 1.4;
               background: #f9f9f9;
             }
-            .container {
+            .tweet {
               background: #fff;
               margin-top: 1rem;
               margin-bottom: 1px;
@@ -802,44 +836,47 @@
               border: 1px solid #ddd;
               border-radius: 8px;
             }
-            .container.thread-tweet {                   /* Visually make thread connect to the tweet above them */
+
+            .tweet.storm-reply {                   /* Visually make thread connect to the tweet above them */
               margin-top: 1px;
               border-top: none;         
               border-top-left-radius: 0;
               border-top-right-radius: 0;
             }
 
-            .container-media {
+            /* Media container */
+
+            .cm {
               width: 100%;
-              background: #b9b9b9;
+              background: #b9b9b9;  
               border-radius: 8px;
+              border: 1px solid #a0a0fa;
+              box-sizing: border-box; 
               aspect-ratio: 1 / 1; /* Keeps the bounding box square */
               overflow: hidden; /* Ensures the image doesn't overflow the bounding box */
               position: relative; /* Ensures child elements can be positioned relative to this */
             }            
 
-            .container-media img, .container-media video  {
+            .cm img, .cm video  {
               width: 100%;
               height: 100%;
               object-fit: contain; /* Scales the image to fit inside while maintaining aspect ratio */
               object-position: center; /* Centers the image within the box */
-
             } 
 
-            .container-media a:hover {
-              opacity: 0.9;
-            }
 
-            .reply-info {
+            .reply {
               font-size: 0.85rem;
               color: #555;
               margin-bottom: 0.5rem;
             }
-            .reply-info a {
+            .reply a {
               color: #1da1f2;
               text-decoration: none;
             }
-            .header {
+
+            /* Top Matter */
+            .tm {
               font-size: 0.85rem;
               margin-bottom: 1rem;
               display: flex;
@@ -905,12 +942,10 @@
           </style>
         </head>
         <body>
-          <h1>My Exported Tweets</h1>
+          <h1>Exported Tweets</h1>
       `;
 
       html +=`Total tweets: ${sortedTweetWorkingRecords.length}<br>`;
-
-      let previousTweetId = null;
 
       let progressCount = 0;
           
@@ -920,19 +955,7 @@
 
         updateProgressMessage(`Rendering tweet ${progressCount} of ${tweets.length}`);
 
-        let isThread = false;
-
-        if (tweetWorkingRecord.tweet.in_reply_to_status_id_str && tweetWorkingRecord.tweet.in_reply_to_status_id_str === previousTweetId) {
-
-          // This is a reply to own own tweet that immedeately preceeded this one, 
-          // so show as a thread. This visually connects the tweets and also suppresses the "in reply to" line
-          isThread = true;
-
-        } 
-        html += renderTweet(tweetWorkingRecord,isThread,sortedTweetWorkingRecords);   
-        
-        // Remeber this tweet so we can check if the next one is a reply to it
-        previousTweetId = tweetWorkingRecord.tweet.id_str;
+        html += renderTweet(tweetWorkingRecord,sortedTweetWorkingRecords);         
 
       });
 
@@ -1017,13 +1040,13 @@
       
       // Add a CSS grid class based on number of media items
       //const gridClass = mediaFileNames.length > 1 ? ` grid-${Math.min(mediaFileNames.length, 4)}` : '';
-      let mediaHtml = `<div class="container-media">\n`;
+      let mediaHtml = `<div class="cm">\n`;
 
       mediaFileNames.forEach(m => {
 
           const fullFilename = mediapath + tweet.id_str + "-" + m;
                   
-          mediaHtml += `<a href="${fullFilename}" target="_blank" rel="noopener noreferrer">`;
+          mediaHtml += `<a href="${fullFilename}" target="_blank">`;
 
             if (m.endsWith('.mp4')) {
 
@@ -1039,10 +1062,10 @@
 
           } 
             
-          mediaHtml += `</a>\n`;    // media-item
+          mediaHtml += `</a>\n`;    
         });
       
-      mediaHtml += '</div>\n';    // media-grid
+      mediaHtml += '</div>\n';    // cm
       return mediaHtml;
     }
 
