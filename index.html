@@ -811,36 +811,12 @@
 
             .container-media {
               width: 100%;
+              background: #b9b9b9;
+              border-radius: 8px;
               aspect-ratio: 1 / 1; /* Keeps the bounding box square */
               overflow: hidden; /* Ensures the image doesn't overflow the bounding box */
               position: relative; /* Ensures child elements can be positioned relative to this */
             }            
-
-            .media-grid {
-              display: grid;
-              grid-gap: 2px;
-              margin: 0.5rem 0;
-              border-radius: 8px;
-              overflow: hidden;
-            }
-            .media-grid.grid-2 {
-              grid-template-columns: repeat(2, 1fr);
-            }
-            .media-grid.grid-3 {
-              grid-template-columns: repeat(2, 1fr);
-            }
-            .media-grid.grid-3 .media-item:first-child {
-              grid-column: span 2;
-            }
-            .media-grid.grid-4 {
-              grid-template-columns: repeat(2, 1fr);
-            }
-            .media-item {
-              width: 100%;
-              aspect-ratio: 1/1;
-              position: relative;
-              object-fit: contain;               
-            }
 
             .container-media img, .container-media video  {
               width: 100%;
@@ -848,31 +824,9 @@
               object-fit: contain; /* Scales the image to fit inside while maintaining aspect ratio */
               object-position: center; /* Centers the image within the box */
 
-              border-radius: 8px;
-              border: 1px solid #ccc;
             } 
 
-            // .media-item {
-            //   width: 100%;
-            //   aspect-ratio: 16/9;  /* maintain consistent aspect ratio */
-            //   height: 300px;      /* fixed height */
-            //   overflow: hidden;   /* crop overflow */
-            //   position: relative; /* for absolute positioning of child */
-            //   border: 1px solid #ccc;
-            //   border-radius: 8px 8px 0 0;
-            //   object-fit: cover;    /* scale and crop to fill */
-            //   object-position: center; /* center the image/video */
-            // }
-
-            // .media-item img, .media-item video {
-            //   position: absolute;
-            //   width: 100%;
-            //   height: 100%;
-            //   object-fit: cover;    /* scale and crop to fill */
-            //   object-position: center; /* center the image/video */
-            // }            
-
-            .media-item a:hover {
+            .container-media a:hover {
               opacity: 0.9;
             }
 
